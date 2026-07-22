@@ -1,0 +1,3870 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Airtable Image Annotator</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="/fabric.js"></script>
+<style>
+  :root { --ink:#3F434E; --ink-strong:#1F2229; --muted:#8A8F9B; --chev:#9298A3;
+          --disabled:#C3C7CF; --line:#E0E1E6; --barline:#E3E4E8; --soft:#F0F1F4;
+          --accent:#2D7FF9;
+          --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;
+         color:var(--ink); background:#fff; }
+  select,input[type=password],input[type=text] {
+    font:inherit; padding:6px 8px; border:1px solid var(--line); border-radius:8px;
+    background:#fff; max-width:220px; }
+  /* native select arrows sit flush against the edge - draw our own, with room */
+  select { -webkit-appearance:none; appearance:none; padding-right:30px;
+    background:#fff no-repeat right 10px center; background-size:11px 11px;
+    background-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%239298A3'%20stroke-width='2.5'%3E%3Cpath%20d='M6%209l6%206%206-6'/%3E%3C/svg%3E"); }
+  button { font:inherit; padding:7px 14px; border:1px solid var(--line); border-radius:8px;
+           background:#fff; cursor:pointer; }
+  button:hover { background:var(--soft); }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button.primary:hover { filter:brightness(1.08); }
+  #banner { display:none; padding:10px 16px; background:#fff6d9; border-bottom:1px solid #eadfa0;
+            font-size:14px; }
+  #banner button { margin-left:10px; }
+  /* z-index above the settings overlay (60) - messages while the dialog is
+     open ("reading tables…", token errors) must never hide behind it */
+  #status { position:fixed; left:50%; bottom:22px; transform:translateX(-50%);
+            background:var(--ink); color:#fff; padding:10px 14px 10px 18px;
+            border-radius:10px; font-size:14px; display:none; z-index:70;
+            max-width:80%; align-items:center; gap:12px; line-height:1.45; }
+  #statusX { border:0; background:none; color:rgba(255,255,255,0.55); cursor:pointer;
+             padding:2px 6px; font-size:12px; border-radius:5px; flex:0 0 auto;
+             align-self:flex-start; }
+  #statusX:hover { color:#fff; background:rgba(255,255,255,0.14); }
+  #portNote { display:none; padding:10px 16px; background:#fdecea;
+              border-bottom:1px solid #f5c6c0; font-size:14px; }
+  #verNote { display:none; padding:10px 16px; background:#fdecea;
+             border-bottom:1px solid #f5c6c0; font-size:14px; }
+  /* keyboard users get the same affordances as mouse users */
+  .recRow:focus-visible, .recRowC:focus-visible, .imgDot:focus-visible,
+  .moreLink:focus-visible, .railView:focus-visible, .railChip:focus-visible,
+  .railRecent:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  /* ---- screen 1: the rail down the left, the record list on the right ---- */
+  #home { display:flex; height:100vh; overflow:hidden; }
+  #homeRail { flex:0 0 224px; border-right:1px solid var(--barline); background:#FBFBFC;
+              display:flex; flex-direction:column; padding:14px 10px 10px; min-width:0; }
+  #railTitle { font-size:15px; font-weight:700; color:var(--ink-strong); padding:0 8px 12px;
+               white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:0 0 auto; }
+  #railScroll { flex:1; overflow-y:auto; min-height:0; }
+  .railHead { font-size:11px; font-weight:600; color:var(--muted); text-transform:uppercase;
+              letter-spacing:0.04em; padding:0 8px 6px; }
+  .railSep { height:1px; background:var(--barline); margin:12px 8px; }
+  .railView { display:flex; align-items:center; gap:8px; height:32px; padding:0 10px;
+              border-radius:8px; cursor:pointer; font-size:13px; font-weight:500;
+              color:var(--ink); }
+  .railView svg { width:13px; height:13px; flex:0 0 auto; opacity:0.6; }
+  .railView .vname { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .railView .vcount { margin-left:auto; font-size:11px; color:var(--chev); font-weight:500;
+                      padding-left:6px; flex:0 0 auto; }
+  .railView:hover { background:var(--soft); }
+  .railView.sel { background:rgba(45,127,249,0.10); color:var(--accent); }
+  #railViewsHint { font-size:11px; color:#B4B8C0; padding:6px 8px 0; line-height:1.5; }
+  .railChip { display:flex; align-items:center; height:28px; padding:0 10px; border-radius:8px;
+              cursor:pointer; font-size:12.5px; font-weight:500; color:var(--ink); }
+  .railChip .vcount { margin-left:auto; font-size:11px; color:var(--chev); font-weight:500;
+                      padding-left:6px; }
+  .railChip:hover { background:var(--soft); }
+  .railChip.sel { background:rgba(45,127,249,0.10); color:var(--accent); }
+  .railRecent { display:block; padding:5px 10px; border-radius:8px; cursor:pointer; font-size:12px;
+                color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .railRecent:hover { background:var(--soft); }
+  .railNone { font-size:11px; color:#B4B8C0; padding:2px 10px; }
+  #railFoot { border-top:1px solid var(--barline); padding:10px 8px 0; margin-top:10px;
+              display:flex; flex-direction:column; gap:8px; flex:0 0 auto; }
+  #crumb { font-size:11px; color:var(--muted); line-height:1.5; overflow:hidden;
+           text-overflow:ellipsis; white-space:nowrap; }
+  #btnSettings { font-size:12px; padding:6px 10px; display:inline-flex; align-items:center;
+                 justify-content:center; gap:5px; }
+  #homeMain { flex:1; min-width:0; display:flex; flex-direction:column; }
+  #listBar { display:flex; align-items:center; gap:10px; padding:11px 16px;
+             border-bottom:1px solid var(--barline); flex:0 0 auto;
+             background:linear-gradient(#FDFDFD,#F5F5F7); }
+  #searchBox { flex:1; min-width:140px; -webkit-appearance:none; appearance:none; font:inherit;
+               font-size:13px; padding:8px 12px 8px 32px; border:1px solid var(--line);
+               border-radius:8px; color:var(--ink); background:#fff no-repeat 11px center;
+               background-size:14px 14px;
+               background-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23999'%20stroke-width='2'%3E%3Ccircle%20cx='11'%20cy='11'%20r='7'/%3E%3Cpath%20d='M21%2021l-4.3-4.3'/%3E%3C/svg%3E"); }
+  #searchBox:focus { outline:none; border-color:var(--accent);
+                     box-shadow:0 0 0 3px rgba(45,127,249,0.15); }
+  #searchBox::-webkit-search-cancel-button { -webkit-appearance:none; }
+  #headline { font-size:12px; color:var(--muted); white-space:nowrap; }
+  #listScroll { flex:1; overflow-y:auto; min-height:0; }
+  #listFoot { flex:0 0 auto; border-top:1px solid var(--barline); background:#FBFBFC;
+              padding:6px 16px; display:flex; align-items:center; gap:10px;
+              font-size:12px; color:var(--muted); }
+  #footRight { margin-left:auto; color:var(--disabled); white-space:nowrap; }
+  .dotDemo { display:inline-block; width:10px; height:10px; border-radius:3px;
+             border:1px solid var(--disabled); background:#fff; vertical-align:-1px; }
+  .dotDemo.on { background:#1db954; border-color:#1db954; }
+  /* comfortable rows */
+  .recRow { display:flex; align-items:flex-start; gap:14px; padding:9px 16px;
+            border-bottom:1px solid #EDEEF1; cursor:pointer; }
+  .recRow:hover { background:var(--soft); }
+  .recRow .thumb { width:72px; height:50px; border-radius:8px; object-fit:cover; display:block;
+                   background:var(--soft); border:1px solid var(--line); flex:0 0 auto; }
+  .recBody { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+  .recHead { display:flex; align-items:center; gap:8px; min-width:0; }
+  .recName { font-weight:600; font-size:13px; white-space:nowrap; overflow:hidden;
+             text-overflow:ellipsis; color:var(--ink-strong); }
+  .recCount { font-size:11px; color:var(--chev); white-space:nowrap; }
+  .matchChip { font-family:var(--mono); font-size:10px; color:var(--accent);
+               background:rgba(45,127,249,0.10); padding:1px 6px; border-radius:5px;
+               white-space:nowrap; flex:0 0 auto; }
+  .recNotes { color:var(--muted); font-size:12px; line-height:1.5; overflow:hidden;
+              display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+  .recNotes.open { -webkit-line-clamp:99; }
+  .moreLink { font-size:11px; font-weight:600; color:var(--accent); cursor:pointer;
+              align-self:flex-start; }
+  .moreLink:hover { text-decoration:underline; }
+  .dotsWrap { display:inline-flex; gap:4px; align-items:center; flex:0 0 auto; padding-top:4px;
+              flex-wrap:wrap; max-width:170px; justify-content:flex-end; }
+  .imgDot { width:12px; height:12px; border-radius:4px; background:#fff;
+            border:1px solid var(--disabled); cursor:pointer; flex:0 0 auto; }
+  .imgDot.on { background:#1db954; border-color:#1db954; }
+  .imgDot:hover { box-shadow:0 0 0 2px rgba(45,127,249,0.35); }
+  .recWhen { font-size:12px; color:var(--muted); white-space:nowrap; flex:0 0 88px;
+             text-align:right; padding-top:3px; }
+  /* compact rows */
+  .cWrap { border-bottom:1px solid #EDEEF1; }
+  .recRowC { display:flex; align-items:center; gap:10px; padding:5px 16px; cursor:pointer;
+             min-height:34px; }
+  .recRowC:hover { background:var(--soft); }
+  .recRowC .thumbC { width:30px; height:22px; border-radius:4px; object-fit:cover; display:block;
+                     background:var(--soft); border:1px solid var(--line); flex:0 0 auto; }
+  .recNameC { font-weight:600; font-size:12.5px; white-space:nowrap; overflow:hidden;
+              text-overflow:ellipsis; color:var(--ink-strong); flex:0 1 auto; min-width:0; }
+  .noteBtn { border:0; background:none; color:var(--chev); cursor:pointer; padding:2px;
+             display:inline-flex; flex:0 0 auto; border-radius:4px; }
+  .noteBtn:hover { background:none; color:var(--accent); }
+  .noteBtn.on { color:var(--accent); }
+  .noteBtn svg { width:13px; height:13px; }
+  .cSpacer { flex:1; }
+  .dotsWrap.small { padding-top:0; gap:3px; }
+  .dotsWrap.small .imgDot { width:9px; height:9px; border-radius:3px; }
+  .recWhenC { font-size:11px; color:var(--muted); white-space:nowrap; flex:0 0 80px;
+              text-align:right; }
+  .cNote { padding:0 16px 8px 56px; font-size:12px; color:var(--muted); line-height:1.5;
+           max-width:640px; }
+  #empty { padding:40px; text-align:center; color:#777; display:none; }
+  @media (max-width:900px) { #homeRail { flex-basis:190px; } }
+  /* ---- settings dialog ---- */
+  #settingsOverlay { position:fixed; inset:0; background:rgba(20,24,40,0.45); display:none;
+                     z-index:60; align-items:flex-start; justify-content:center;
+                     padding-top:5vh; }
+  #settingsOverlay.on { display:flex; }
+  #settingsBox { background:#fff; border-radius:14px; width:560px; max-width:92vw;
+                 max-height:88vh; overflow-y:auto; padding:0;
+                 box-shadow:0 12px 40px rgba(0,0,0,0.25); }
+  .setHead { display:flex; align-items:center; padding:16px 22px 12px;
+             border-bottom:1px solid var(--line); position:sticky; top:0; background:#fff;
+             z-index:2; }
+  .setHead > span { font-size:16px; font-weight:600; color:var(--ink-strong); }
+  #btnSettingsX { margin-left:auto; border:0; background:none; color:var(--muted);
+                  cursor:pointer; font-size:15px; padding:4px 6px; border-radius:6px; }
+  #btnSettingsX:hover { background:var(--soft); color:var(--ink); }
+  .setBody { padding:16px 22px; display:flex; flex-direction:column; gap:20px; }
+  .setSec { display:flex; flex-direction:column; gap:10px; }
+  .setSecHead { font-size:11px; font-weight:600; color:var(--muted); text-transform:uppercase;
+                letter-spacing:0.04em; }
+  .setDivider { height:1px; background:#EDEEF1; }
+  .setGrid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .setRow { display:flex; flex-direction:column; gap:4px; font-size:12px; color:#666; }
+  .setRow select, .setRow input[type=password] { max-width:none; width:100%; font-size:14px;
+                                                 color:var(--ink); }
+  /* the searchable base picker (the hidden select underneath stays the truth) */
+  .rowWith { display:flex; gap:6px; align-items:center; }
+  #ddBase { flex:1; min-width:0; display:inline-flex; }
+  #baseTrig { width:100%; height:34px; justify-content:space-between; font-size:14px;
+              font-weight:400; padding:0 10px; min-width:0; }
+  #baseTrigLabel { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #baseMenu { left:0; width:100%; max-height:320px; overflow-y:auto; top:38px; }
+  #baseSearch { display:block; width:calc(100% - 4px); margin:2px 2px 6px; font:inherit;
+                font-size:13px; padding:6px 9px; border:1px solid var(--line);
+                border-radius:6px; outline:none; -webkit-appearance:none; appearance:none;
+                max-width:none; }
+  #baseSearch:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(45,127,249,0.15); }
+  #baseList .ddRow { justify-content:space-between; }
+  #btnReloadBases { width:34px; height:34px; padding:0; display:inline-flex;
+                    align-items:center; justify-content:center; flex:0 0 auto; }
+  #btnReloadBases svg { width:14px; height:14px; }
+  .setHint { font-size:12px; color:var(--muted); line-height:1.5; }
+  .setCheck { display:flex; align-items:center; gap:8px; padding-left:2px; font-size:13px;
+              color:var(--ink); }
+  .setCheck input { width:auto; max-width:none; }
+  .fieldRow { display:flex; align-items:center; gap:10px; padding:8px 10px;
+              border:1px solid var(--line); border-radius:10px; background:#FBFBFC; }
+  .fieldRow .fmark { width:18px; height:18px; border-radius:50%; color:#fff; font-size:11px;
+                     display:inline-flex; align-items:center; justify-content:center;
+                     flex:0 0 auto; }
+  .fieldRow .fmeta { display:flex; flex-direction:column; gap:1px; min-width:0; }
+  .fieldRow .fname { font-family:var(--mono); font-size:12px; color:var(--ink-strong); }
+  .fieldRow .fdesc { font-size:11px; color:var(--muted); }
+  .fieldRow .fok { margin-left:auto; font-size:11px; color:#1db954; font-weight:600;
+                   white-space:nowrap; }
+  .fieldRow .fmake { margin-left:auto; font-size:12px; padding:5px 10px;
+                     border:1px solid var(--accent); border-radius:8px; background:var(--accent);
+                     color:#fff; white-space:nowrap; }
+  .fieldRow .fmake:hover { background:var(--accent); filter:brightness(1.08); }
+  #appFieldRows { display:flex; flex-direction:column; gap:8px; }
+  #tokenState { font-size:11px; font-weight:600; white-space:nowrap; }
+  #btnTokenReplace { margin-left:auto; font-size:12px; padding:5px 10px; white-space:nowrap; }
+  .setFoot { display:flex; align-items:center; gap:8px; padding:12px 22px 16px;
+             border-top:1px solid var(--line); position:sticky; bottom:0; background:#fff;
+             z-index:2; }
+  .setFoot .setHint { margin-right:auto; }
+  .setFoot button { font-size:13px; padding:7px 14px; }
+  /* ---- editor ---- */
+  #editor { display:none; flex-direction:column; height:100vh; }
+  #toolbar { display:flex; align-items:center; gap:4px; padding:7px 10px;
+             border-bottom:1px solid var(--barline); flex-wrap:wrap;
+             background:linear-gradient(#FDFDFD,#F5F5F7); }
+  #toolbar .tool { padding:6px 10px; font-size:13px; }
+  .tool.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+  /* icon-only buttons - all explanation lives in the tooltips */
+  .ibtn { width:34px; height:32px; min-width:34px; padding:0 !important;
+          display:inline-flex; align-items:center; justify-content:center;
+          border:1px solid transparent; border-radius:8px; background:none;
+          color:var(--ink); }
+  .ibtn:hover { background:var(--soft); }
+  .ibtn.active { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .ibtn:disabled { color:var(--disabled); cursor:default; }
+  .ibtn:disabled:hover { background:none; }
+  .ibtn svg { width:17px; height:17px; display:block; }
+  /* the accent rule: SOLID accent = the one selected thing (tool, mode,
+     segment); SOFT accent = an independent property that is switched on */
+  .ibtn.tgl.active { background:rgba(45,127,249,.10); border-color:var(--accent);
+                     color:var(--accent); }
+  #rightTools { margin-left:auto; display:flex; align-items:center; gap:6px; }
+  /* the tool rail down the left side of the picture */
+  #toolRail { flex:0 0 48px; border-right:1px solid var(--barline);
+              background:linear-gradient(#FDFDFD,#F5F5F7);
+              display:flex; flex-direction:column; align-items:center; gap:4px;
+              padding:8px 0; overflow-y:auto; }
+  #toolRail .ibtn { width:38px; height:38px; min-width:38px; min-height:38px;
+                    flex:0 0 auto; border-radius:9px; }
+  #toolRail .ibtn svg { width:19px; height:19px; }
+  .sep { width:1px; height:22px; background:var(--barline); margin:0 5px; }
+  /* ---- dropdowns: one shared anatomy for color / weight / opacity ---- */
+  .dd { position:relative; display:inline-flex; }
+  .ddTrig { height:32px; display:inline-flex; align-items:center; gap:6px; padding:0 8px;
+            border:1px solid var(--line); border-radius:8px; background:#fff;
+            cursor:pointer; font:inherit; font-size:12px; font-weight:500;
+            color:var(--ink); }
+  .ddTrig:hover { background:var(--soft); }
+  .dd.open .ddTrig { border-color:var(--accent);
+                     box-shadow:0 0 0 3px rgba(45,127,249,.14); }
+  .chev { width:11px; height:11px; color:var(--chev); flex:0 0 auto; }
+  .ddMenu { position:absolute; top:40px; left:0; background:#fff; border-radius:10px;
+            border:1px solid rgba(0,0,0,.07); box-shadow:0 10px 28px rgba(0,0,0,.20);
+            padding:5px; display:none; z-index:40; }
+  .dd.open .ddMenu { display:block; }
+  .ddRow { display:flex; align-items:center; gap:10px; height:30px; padding:0 10px;
+           border-radius:6px; cursor:pointer; white-space:nowrap; font-size:12px;
+           color:var(--ink); }
+  .ddRow:hover { background:#F0F1F4; }
+  .ddRow.sel { background:rgba(45,127,249,.10); color:var(--accent); }
+  .ddRow .check { margin-left:auto; color:var(--accent); font-size:12px;
+                  visibility:hidden; padding-left:14px; }
+  .ddRow.sel .check { visibility:visible; }
+  .cdisc { width:18px; height:18px; border-radius:50%;
+           box-shadow:inset 0 0 0 1px rgba(0,0,0,.15); }
+  #colorGrid { display:grid; grid-template-columns:repeat(4,22px); gap:8px; padding:4px; }
+  #colorGrid .csw { width:22px; height:22px; border-radius:50%; cursor:pointer; border:0;
+                    padding:0; box-shadow:inset 0 0 0 1px rgba(0,0,0,.15); }
+  #colorGrid .csw.sel { outline:2px solid var(--accent); outline-offset:2px; }
+  #cswAdd { display:block; width:100%; margin-top:8px; padding:5px 8px; font:inherit;
+            font-size:12px; border:1px dashed var(--line); border-radius:6px;
+            background:none; color:var(--muted); cursor:pointer; white-space:nowrap; }
+  #cswAdd:hover { color:var(--accent); border-color:var(--accent); }
+  .wline { border-radius:2px; background:var(--ink); }
+  /* ---- tooltips: dark pill with the name and the shortcut key ---- */
+  #tip { position:fixed; background:rgba(28,30,36,.95); color:#fff; font-size:11px;
+         font-weight:500; padding:6px 10px; border-radius:6px; z-index:100;
+         pointer-events:none; box-shadow:0 4px 12px rgba(0,0,0,.25);
+         display:none; align-items:center; gap:6px; white-space:nowrap; }
+  #tip .key { background:rgba(255,255,255,.16); border-radius:4px; padding:1px 5px;
+              font-family:var(--mono); font-size:10px; font-weight:600; }
+  #workArea { flex:1; display:flex; overflow:hidden; }
+  #canvasWrap { flex:1; overflow:hidden; background:#34363D; position:relative; }
+  #notesPanel { flex:0 0 300px; border-left:1px solid var(--line); display:none;
+                flex-direction:column; background:#fff; }
+  #notesPanel.on { display:flex; }
+  #notesTitle { padding:10px 12px; font-weight:600; font-size:13px;
+                border-bottom:1px solid var(--line); color:#555;
+                overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #notesText { flex:1; border:0; padding:12px; font:inherit; font-size:14px;
+               line-height:1.5; resize:none; outline:none; }
+  /* segmented control (arrow heads, crop aspects) */
+  .seg { display:inline-flex; border:1px solid var(--line); border-radius:8px;
+         overflow:hidden; background:#fff; }
+  .segBtn { width:34px; height:30px; border:0; border-radius:0; background:none;
+            color:var(--ink); cursor:pointer; display:inline-flex;
+            align-items:center; justify-content:center; padding:0; font:inherit; }
+  .segBtn:hover { background:var(--soft); }
+  .segBtn.active { background:var(--accent); color:#fff; }
+  .segBtn svg { width:15px; height:15px; }
+  .aspBtn { width:auto; padding:0 10px; font-size:12px; font-weight:500;
+            white-space:nowrap; }
+  .mprev { border-radius:50%; background:var(--ink); color:#fff; display:inline-flex;
+           align-items:center; justify-content:center; font-weight:700;
+           flex:0 0 auto; line-height:1; }
+  .mwrap { width:22px; height:22px; display:inline-flex; align-items:center;
+           justify-content:center; flex:0 0 auto; }
+  #ctx { display:flex; align-items:center; gap:4px; min-height:34px; }
+  /* the bar law: a control the tool doesn't use is REMOVED from layout -
+     everything packs flush against its neighbours, nothing floats */
+  .off { display:none !important; }
+  #statusBar { flex:0 0 auto; border-top:1px solid var(--barline); background:#FBFBFC;
+               padding:5px 14px; display:flex; align-items:center; gap:14px; }
+  #nameWrap { font-size:12px; color:var(--muted); display:flex; align-items:center;
+              white-space:nowrap; overflow:hidden; min-width:0; flex:0 1 auto; }
+  #fnameZone { display:inline-flex; align-items:center; min-width:0; }
+  #fnameStem { overflow:hidden; text-overflow:ellipsis; }
+  #fnameZone.canRename #fnameStem { cursor:text; }
+  #fnameZone.canRename:hover #fnameStem { color:var(--accent);
+      text-decoration:underline dashed; text-underline-offset:3px; }
+  #fnamePencil { display:none; border:0; background:none; color:var(--muted);
+                 width:20px; height:20px; padding:2px; cursor:pointer;
+                 align-items:center; justify-content:center; }
+  #fnamePencil svg { width:13px; height:13px; }
+  #fnameZone.canRename:hover #fnamePencil { display:inline-flex; }
+  #fnamePencil:hover { color:var(--accent); }
+  #fnameEdit { display:none; align-items:center; gap:4px; }
+  #fnameEdit.on { display:inline-flex; }
+  #fnameInput { font-family:var(--mono); font-size:12px; padding:3px 6px;
+                border:1px solid var(--accent); border-radius:6px; width:220px;
+                outline:none; box-shadow:0 0 0 3px rgba(45,127,249,.14);
+                color:var(--ink-strong); }
+  #fnameEdit.invalid #fnameInput { border-color:#e02020;
+                box-shadow:0 0 0 3px rgba(224,32,32,.15); }
+  #fnameEdit.saving #fnameInput { opacity:.5; pointer-events:none; }
+  #fnameExtLock { font-family:var(--mono); font-size:12px; color:var(--muted); }
+  #fnameOk, #fnameNo { border:1px solid var(--line); background:#fff;
+                border-radius:6px; width:22px; height:22px; padding:0;
+                cursor:pointer; font-size:12px; color:var(--ink); }
+  #fnameOk:hover { color:var(--accent); border-color:var(--accent); }
+  #fnameNo:hover { color:#e02020; border-color:#e02020; }
+  #fnameHint { color:#e02020; font-size:11px; }
+  /* the filmstrip: the record's images, print toggles, and the + tile */
+  #filmstrip { display:flex; gap:8px; margin-left:auto; overflow-x:auto;
+               align-items:flex-end; padding:2px 4px; position:relative; }
+  .fsItem { position:relative; flex:0 0 auto; padding-top:6px; }
+  #filmstrip img { height:44px; width:60px; object-fit:cover; border-radius:6px;
+                   cursor:pointer; display:block; }
+  .fsItem:not(.current) img { opacity:0.55; }
+  .fsItem:not(.current) img:hover { opacity:0.85; }
+  .fsItem.noprint img { opacity:0.45; }
+  .fsItem:not(.current).noprint img { opacity:0.30; }
+  .fsItem.current { transform:scale(1.08); transform-origin:bottom center; }
+  .fsItem.current img { cursor:grab;
+    box-shadow:0 0 0 2.5px var(--accent), 0 0 12px rgba(45,127,249,.45); }
+  .fsItem.dragging img { opacity:0.4; }
+  #fsInsert { position:absolute; width:3px; height:52px; background:var(--accent);
+              border-radius:2px; bottom:2px; display:none; pointer-events:none;
+              z-index:3; }
+  .printBadge { position:absolute; bottom:3px; left:3px; z-index:2; width:16px;
+                height:16px; border-radius:5px; border:1px solid var(--line);
+                background:#fff; color:#fff; font-size:10px; font-weight:600;
+                line-height:14px; text-align:center; padding:0; cursor:pointer; }
+  .printBadge.on { background:var(--accent); border-color:var(--accent); }
+  .fsAdd { width:56px; height:44px; border:2px dashed var(--line); border-radius:6px;
+           background:none; color:#aaa; font-size:20px; cursor:pointer; padding:0;
+           flex:0 0 auto; line-height:1; }
+  .fsAdd:hover { color:var(--accent); border-color:var(--accent); }
+  #loadingBig { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+                color:#fff; font-size:15px; }
+</style>
+</head>
+<body>
+
+<!-- ======== screen 1: the record list ======== -->
+<div id="home">
+  <div id="homeRail">
+    <div id="railTitle">Pictures</div>
+    <div id="railScroll">
+      <div class="railHead">Views</div>
+      <div id="railViews"></div>
+      <div id="railViewsHint">Views come straight from Airtable — filter the table there and it shows up here.</div>
+      <div id="railFilterSec" style="display:none">
+        <div class="railSep"></div>
+        <div class="railHead" id="railFilterName"></div>
+        <div id="railFilterChips"></div>
+      </div>
+      <div class="railSep"></div>
+      <div class="railHead">Recent</div>
+      <div id="railRecent"></div>
+    </div>
+    <div id="railFoot">
+      <div id="crumb"></div>
+      <button id="btnSettings" title="Base, table, fields and token"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2-1.2L14.2 3h-4l-.4 2.5a7 7 0 0 0-2 1.2l-2.3-1-2 3.4 2 1.5a7 7 0 0 0 0 2.4l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2 1.2l.4 2.5h4l.4-2.5a7 7 0 0 0 2-1.2l2.3 1 2-3.4-2-1.5c.06-.4.1-.8.1-1.2z"/></svg>Settings</button>
+    </div>
+  </div>
+  <div id="homeMain">
+    <div id="banner"></div>
+    <div id="portNote"></div>
+    <div id="verNote"></div>
+    <div id="listBar">
+      <input id="searchBox" type="search" placeholder="Search everything — record names, comments, file names…">
+      <span class="dd" id="ddSort">
+        <button class="ddTrig" data-tip="Sort the list"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><path d="M7 4v13M4 14l3 3 3-3M17 20V7M14 10l3-3 3 3"/></svg><span id="sortLabel">View order</span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg></button>
+        <span class="ddMenu" id="sortMenu" style="left:auto; right:0;"></span>
+      </span>
+      <span class="seg">
+        <button class="segBtn" id="btnComfy" data-tip="Comfortable"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="7" rx="1.5"/><rect x="4" y="14" width="16" height="7" rx="1.5"/></svg></button>
+        <button class="segBtn" id="btnCompact" data-tip="Compact — fits 3× more rows"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16M4 9.5h16M4 14h16M4 18.5h16"/></svg></button>
+      </span>
+      <button class="ibtn" id="btnLoad" data-tip="Reload the images from Airtable" style="border:1px solid var(--line); background:#fff;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"/><path d="M18.5 2.5v4h-4"/></svg></button>
+      <span id="headline"></span>
+    </div>
+    <div id="listScroll">
+      <div id="grid"></div>
+      <div id="empty">No images found here. Check the view and image field under Settings,
+        or add images in Airtable and press Refresh.</div>
+      <div id="scrollSentinel" style="height:1px"></div>
+    </div>
+    <div id="listFoot">
+      <span><span class="dotDemo on"></span> annotated&nbsp;&nbsp;<span class="dotDemo"></span> plain — one square per image; click a square to open that picture</span>
+      <span id="footRight"></span>
+    </div>
+  </div>
+
+  <!-- ======== the settings dialog ======== -->
+  <div id="settingsOverlay">
+    <div id="settingsBox">
+      <div class="setHead">
+        <span>Settings</span>
+        <button id="btnSettingsX" title="Close without applying">✕</button>
+      </div>
+      <div class="setBody">
+        <div class="setSec">
+          <div class="setSecHead">Where your pictures live</div>
+          <div class="setRow">Base
+            <span class="rowWith">
+              <span class="dd" id="ddBase">
+                <button type="button" class="ddTrig" id="baseTrig"><span id="baseTrigLabel">Loading…</span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg></button>
+                <span class="ddMenu" id="baseMenu">
+                  <input id="baseSearch" type="search" placeholder="Search bases…" autocomplete="off" spellcheck="false">
+                  <span id="baseList"></span>
+                </span>
+              </span>
+              <button id="btnReloadBases" title="Reload bases, tables and field names from Airtable"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"/><path d="M18.5 2.5v4h-4"/></svg></button>
+            </span>
+            <select id="selBase" style="display:none"><option>Loading…</option></select>
+          </div>
+          <div class="setGrid">
+            <label class="setRow">Table<select id="selTable"></select></label>
+            <label class="setRow">View<select id="selView"></select></label>
+          </div>
+          <div class="setHint">Big table? Pick a filtered Airtable view here — the list then only loads what you need.</div>
+        </div>
+        <div class="setDivider"></div>
+        <div class="setSec">
+          <div class="setSecHead">Fields</div>
+          <div class="setGrid">
+            <label class="setRow">Image field — the pictures you annotate<select id="selImgField"></select></label>
+            <label class="setRow">Name field — shown on each row<select id="selNameField"></select></label>
+          </div>
+          <label class="setRow">Comments field — shown on each list row and in the editor<select id="selNotesField"></select></label>
+          <div class="setCheck">
+            <input type="checkbox" id="chkNotes">
+            <label for="chkNotes" style="cursor:pointer;">Show the comments panel in the editor</label>
+          </div>
+          <label class="setRow" id="filterFieldRow">Filter field — a single-select field shown as filters in the list<select id="selFilterField"></select></label>
+        </div>
+        <div class="setDivider"></div>
+        <div class="setSec">
+          <div class="setSecHead">Airtable button</div>
+          <div class="setHint">Copies a ready-to-paste "Annotate" button formula for this table, built from the choices above with rename-proof field ids. In Airtable: add a field, type "Button", action "Open URL", paste.</div>
+          <button id="btnCopyFormula" style="align-self:flex-start; font-size:12px; padding:6px 12px;">Copy button formula</button>
+        </div>
+        <div class="setDivider"></div>
+        <div class="setSec">
+          <div class="setSecHead">App fields on this table</div>
+          <div class="setHint">Three fields the app manages for you. Delete them and every trace of the app is gone.</div>
+          <div id="appFieldRows"></div>
+        </div>
+        <div class="setDivider"></div>
+        <div class="setSec">
+          <div class="setSecHead">Airtable token</div>
+          <div class="fieldRow">
+            <span class="fname" id="tokenHintTxt"></span>
+            <span id="tokenState"></span>
+            <button id="btnTokenReplace">Replace…</button>
+          </div>
+          <label class="setRow" id="tokenEditRow" style="display:none">Paste the new token
+            <input type="password" id="tokenInput" placeholder="pat…  — it is saved when you press Done">
+          </label>
+          <div class="setHint">Stored only on this computer, next to the app. Anyone who copies that file can act in Airtable as you — <a href="https://airtable.com/create/tokens" target="_blank" style="color:var(--accent)">manage or revoke it at airtable.com</a>.</div>
+        </div>
+      </div>
+      <div class="setFoot">
+        <span class="setHint">Changes apply when you press Done</span>
+        <button id="btnSettingsCancel">Cancel</button>
+        <button id="btnSettingsDone" class="primary">Done</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ======== screen 2: the drawing editor ======== -->
+<div id="editor">
+  <div id="toolbar">
+    <button class="tool" id="btnBack">‹ Save &amp; back</button>
+    <span class="sep"></span>
+    <button class="tool ibtn active" data-tool="select" data-tip="Select" data-key="V"><svg viewBox="0 0 24 24"><path d="M6 3l5.5 16 2.7-6.8L21 9.5z" fill="currentColor" stroke="none"/></svg></button>
+    <button class="tool ibtn" data-tool="pan" data-tip="Pan" data-key="G"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M3 12h18M12 3l-2.5 2.5M12 3l2.5 2.5M12 21l-2.5-2.5M12 21l2.5-2.5M3 12l2.5-2.5M3 12l2.5 2.5M21 12l-2.5-2.5M21 12l-2.5 2.5"/></svg></button>
+    <button class="tool ibtn" data-tool="crop" data-tip="Crop" data-key="C"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2v16h16M2 6h16v16"/></svg></button>
+    <span class="sep" id="sepBeforeCtx"></span>
+    <span id="ctx">
+      <button class="tool ibtn tgl" id="btnBorder" data-tip="Outline (border) around the image"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3.5" y="3.5" width="17" height="17" rx="2.5"/><rect x="8" y="8" width="8" height="8" rx="1" opacity="0.45"/></svg></button>
+      <span class="dd" id="ddColor">
+        <button class="ddTrig" data-tip="Color"><span class="cdisc" id="colorDisc"></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg></button>
+        <span class="ddMenu"><span id="colorGrid"></span></span>
+      </span>
+      <span class="dd" id="ddWeight">
+        <button class="ddTrig" data-tip="Line weight"><span class="wline" id="weightPrev" style="width:22px;height:3px"></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg></button>
+        <span class="ddMenu" id="weightMenu"></span>
+      </span>
+      <span class="seg" id="grpHeads">
+        <button class="segBtn" data-heads="0" data-tip="Plain line — no heads"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 12h16"/></svg></button>
+        <button class="segBtn active" data-heads="1" data-tip="Arrow — one head"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h15M14 7l5 5-5 5"/></svg></button>
+        <button class="segBtn" data-heads="2" data-tip="Double — heads at both ends"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M10 7l-5 5 5 5M14 7l5 5-5 5"/></svg></button>
+      </span>
+      <button class="tool ibtn tgl" id="btnFill" data-tip="Fill"><svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="2" fill="currentColor" stroke="none" opacity="0.35"/><rect x="4" y="6" width="16" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2"/></svg></button>
+      <span class="dd" id="ddFontSize">
+        <button class="ddTrig" data-tip="Text size"><span id="fsLabel">24 pt</span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg></button>
+        <span class="ddMenu" id="fsMenu" style="max-height:280px; overflow-y:auto"></span>
+      </span>
+      <span class="dd" id="ddFontStyle">
+        <button class="ddTrig" data-tip="Text style"><span id="fstylePrev" style="font-weight:600">A</span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg></button>
+        <span class="ddMenu" id="fstyleMenu"></span>
+      </span>
+      <span class="dd" id="ddMarkerSize">
+        <button class="ddTrig" data-tip="Badge size"><span class="mwrap"><span class="mprev" id="msizePrev" style="width:15px;height:15px;font-size:8px">1</span></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg></button>
+        <span class="ddMenu" id="msizeMenu"></span>
+      </span>
+      <span class="dd" id="ddBlur">
+        <button class="ddTrig" data-tip="Blur strength"><span id="blurLabel">Medium</span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg></button>
+        <span class="ddMenu" id="blurMenu"></span>
+      </span>
+      <button class="tool ibtn tgl" id="btnDash" data-tip="Dashed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 12h4M10 12h4M17 12h4"/></svg></button>
+      <span class="dd" id="ddOpac">
+        <button class="ddTrig" data-tip="Opacity"><svg width="14" height="14" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></svg><span id="opacLabel">100%</span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg></button>
+        <span class="ddMenu" id="opacMenu"></span>
+      </span>
+      <span class="seg" id="grpAspect">
+        <button class="segBtn aspBtn active" data-asp="" data-tip="Freehand crop">Free</button>
+        <button class="segBtn aspBtn" data-asp="orig" data-tip="The photo's own shape">Original</button>
+        <button class="segBtn aspBtn" data-asp="1" data-tip="Square">1:1</button>
+        <button class="segBtn aspBtn" data-asp="1.33333" data-tip="4 by 3">4:3</button>
+        <button class="segBtn aspBtn" data-asp="1.77778" data-tip="16 by 9">16:9</button>
+      </span>
+      <button class="tool" id="btnCropApply" style="color:var(--accent); font-weight:600" data-tip="Keep this crop" data-key="⏎">Apply</button>
+      <button class="tool" id="btnCropCancel" data-tip="Back out of the crop" data-key="Esc">Cancel</button>
+      <span class="sep" id="ctxSep"></span>
+      <button class="tool ibtn" id="btnToFront" data-tip="Bring to front"><svg viewBox="0 0 24 24"><rect x="3" y="9" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"/><rect x="9" y="3" width="12" height="12" fill="currentColor" stroke="none"/></svg></button>
+      <button class="tool ibtn" id="btnToBack" data-tip="Send to back"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"/><rect x="3" y="9" width="12" height="12" fill="currentColor" stroke="none"/><rect x="9" y="3" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"/></svg></button>
+      <button class="tool ibtn" id="btnDelete" data-tip="Delete" data-key="⌫"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M9 7V4h6v3M6.5 7l1 13h9l1-13M10 11.5v5M14 11.5v5"/></svg></button>
+    </span>
+    <span id="rightTools">
+      <button class="tool ibtn" id="btnUndo" data-tip="Undo" data-key="⌘Z" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 5L4 9l4 4"/><path d="M4 9h9a6 6 0 0 1 0 12h-3"/></svg></button>
+      <button class="tool ibtn" id="btnRedo" data-tip="Redo" data-key="⇧⌘Z" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 5l4 4-4 4"/><path d="M20 9h-9a6 6 0 0 0 0 12h3"/></svg></button>
+      <span class="sep"></span>
+      <button class="tool ibtn" id="btnFit" data-tip="Fit to window"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+      <button class="tool ibtn" id="btnRotate" data-tip="Rotate 90°"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"/><path d="M18.5 2.5v4h-4"/></svg></button>
+      <button class="tool ibtn" id="btnDownload" data-tip="Download a copy (JPEG)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v11M7.5 9.5L12 14l4.5-4.5M4 20h16"/></svg></button>
+    </span>
+  </div>
+  <div id="workArea">
+    <div id="toolRail">
+      <button class="tool ibtn" data-tool="rect" data-tip="Box" data-key="R"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="6" width="16" height="12" rx="1"/></svg></button>
+      <button class="tool ibtn" data-tool="ellipse" data-tip="Circle" data-key="O"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><ellipse cx="12" cy="12" rx="8" ry="6"/></svg></button>
+      <button class="tool ibtn" data-tool="arrow" data-tip="Arrow" data-key="A"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 19L19 5"/></svg></button>
+      <button class="tool ibtn" data-tool="draw" data-tip="Pen" data-key="P"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 21l2-6L17 3l4 4L9 19l-6 2z"/></svg></button>
+      <button class="tool ibtn" data-tool="hl" data-tip="Highlight" data-key="H"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 15L18 6l-2.5-2.5L6.5 12.5z"/><path d="M6.5 12.5L9 15l-4 3.5L4 17z"/><path d="M4 21h16" stroke-width="3" opacity="0.5"/></svg></button>
+      <button class="tool ibtn" data-tool="text" data-tip="Text" data-key="T"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 5h14M12 5v14"/></svg></button>
+      <button class="tool ibtn" data-tool="marker" data-tip="Numbered marker" data-key="M"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><text x="12" y="16.5" text-anchor="middle" font-size="12" font-weight="bold" fill="currentColor" stroke="none">1</text></svg></button>
+      <button class="tool ibtn" id="btnImage" data-tip="Image — or paste with ⌘V" data-key="I"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10.5" r="1.5"/><path d="M3 17l5-5 4 4 3-3 6 6"/></svg></button>
+      <button class="tool ibtn" data-tool="blur" data-tip="Blur" data-key="B"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="4" y="4" width="4.5" height="4.5"/><rect x="14" y="4" width="4.5" height="4.5" opacity="0.5"/><rect x="9" y="9" width="4.5" height="4.5" opacity="0.7"/><rect x="4" y="14" width="4.5" height="4.5" opacity="0.5"/><rect x="14" y="14" width="4.5" height="4.5"/></svg></button>
+      <button class="tool ibtn" data-tool="spot" data-tip="Spotlight — dims everything outside" data-key="S"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2" opacity="0.5"/><circle cx="12" cy="12" r="4.5"/><path d="M12 5.6v1.5M12 16.9v1.5M5.6 12h1.5M16.9 12h1.5" stroke-linecap="round" opacity="0.7"/></svg></button>
+      <input type="file" id="fileInput" accept="image/*" style="display:none">
+      <input type="file" id="photoInput" accept="image/*" style="display:none">
+    </div>
+    <div id="canvasWrap">
+      <canvas id="cv"></canvas>
+      <div id="loadingBig" style="display:none">Loading picture…</div>
+    </div>
+    <div id="notesPanel">
+      <div id="notesTitle">Instructions</div>
+      <textarea id="notesText" placeholder="Write the comments for this record here - they are saved in Airtable together with the drawings."></textarea>
+    </div>
+  </div>
+  <div id="statusBar">
+    <span id="nameWrap"><span id="nameRecord"></span><span id="nameDash">&nbsp;—&nbsp;</span><span id="fnameZone"><span id="fnameStem"></span><span id="fnameExt"></span><button id="fnamePencil" data-tip="Rename image"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19z"/></svg></button></span><span id="fnameEdit"><input id="fnameInput" type="text" spellcheck="false" autocomplete="off"><span id="fnameExtLock"></span><button id="fnameOk" data-tip="Save" data-key="⏎">✓</button><button id="fnameNo" data-tip="Cancel" data-key="Esc">✕</button><span id="fnameHint"></span></span></span>
+    <span id="filmstrip"></span>
+  </div>
+</div>
+
+<div id="status"></div>
+
+<script>
+"use strict";
+// ---------------------------------------------------------------------------
+// small helpers
+// ---------------------------------------------------------------------------
+const $ = id => document.getElementById(id);
+let statusTimer = null;
+function say(msg, sticky) {
+  const el = $('status');
+  el.textContent = msg;
+  const x = document.createElement('button');   // every message can be ✕'d away
+  x.id = 'statusX';
+  x.textContent = '✕';
+  x.title = 'Dismiss';
+  x.onclick = hideSay;
+  el.appendChild(x);
+  el.style.display = 'flex';
+  clearTimeout(statusTimer);
+  if (!sticky) statusTimer = setTimeout(hideSay, 4000);
+}
+function hideSay(){ $('status').style.display='none'; }
+
+// ---- tooltips: a dark pill with the control's name and its shortcut key ------
+const tipEl = document.createElement('div');
+tipEl.id = 'tip';
+document.body.appendChild(tipEl);
+let tipTimer = null, tipTarget = null;
+function hideTip() { clearTimeout(tipTimer); tipEl.style.display = 'none'; tipTarget = null; }
+document.addEventListener('mouseover', e => {
+  const t = e.target.closest ? e.target.closest('[data-tip]') : null;
+  if (t === tipTarget) return;               // still on the same control - keep it
+  hideTip();
+  tipTarget = t;
+  if (!t) return;
+  tipTimer = setTimeout(() => {
+    tipEl.textContent = t.dataset.tip;
+    if (t.dataset.key) {
+      const k = document.createElement('span');
+      k.className = 'key';
+      k.textContent = t.dataset.key;
+      tipEl.appendChild(k);
+    }
+    tipEl.style.display = 'flex';
+    const r = t.getBoundingClientRect();
+    let x, y;
+    if (t.closest('#toolRail')) {            // rail tools: tooltip to the RIGHT
+      x = r.right + 8;
+      y = r.top + r.height / 2 - tipEl.offsetHeight / 2;
+    } else {                                 // everything else: below
+      x = r.left + r.width / 2 - tipEl.offsetWidth / 2;
+      y = r.bottom + 8;
+      if (y + tipEl.offsetHeight > window.innerHeight - 6) y = r.top - tipEl.offsetHeight - 8;
+    }
+    x = Math.max(6, Math.min(window.innerWidth - tipEl.offsetWidth - 6, x));
+    y = Math.max(6, Math.min(window.innerHeight - tipEl.offsetHeight - 6, y));
+    tipEl.style.left = x + 'px';
+    tipEl.style.top = y + 'px';
+  }, 400);
+});
+document.addEventListener('mousedown', hideTip, true);
+async function api(path, body) {
+  const opts = body ? {method:'POST', headers:{'Content-Type':'application/json'},
+                       body: JSON.stringify(body)} : {};
+  const r = await fetch(path, opts);
+  const data = await r.json().catch(() => ({error:'The app server did not answer properly.'}));
+  if (!r.ok || data.error) throw new Error(data.error || ('Problem: ' + r.status));
+  return data;
+}
+
+if (!window.fabric) {
+  document.body.innerHTML = '<div style="padding:40px;font-family:sans-serif">The drawing '+
+   'library could not load. Please check the internet connection and reload this page.</div>';
+  throw new Error('fabric missing');
+}
+
+// ---------------------------------------------------------------------------
+// screen 1 - dropdowns and the picture grid
+// ---------------------------------------------------------------------------
+let BOOT = null, TABLES = [], CURRENT = {};   // CURRENT = the user's choices
+let TABLE_CHOICES = {};   // tableId -> its own last-used view and fields
+
+// When a button/link in Airtable opens the app with ?recordId=... in the
+// address, we jump straight to that record's images instead of the full grid.
+let DEEP = null;
+{
+  const p = new URLSearchParams(location.search);
+  if (p.get('recordId')) DEEP = {
+    baseId: p.get('baseId'), tableId: p.get('tableId'), recordId: p.get('recordId'),
+    imageField: p.get('imageField'), nameField: p.get('nameField'),
+    instructionsField: p.get('instructionsField'), autoOpened: false,
+  };
+}
+
+function fillSelect(sel, items, chosen) {
+  sel.innerHTML = '';
+  for (const it of items) {
+    const o = document.createElement('option');
+    o.value = it.id !== undefined ? it.id : it;
+    o.textContent = it.name !== undefined ? it.name : it;
+    sel.appendChild(o);
+  }
+  if (chosen && [...sel.options].some(o => o.value === chosen)) sel.value = chosen;
+}
+
+let instructionsOn = false; // show the comments panel in the editor?
+let DENSITY = 'comfy';      // 'comfy' | 'compact' - the list density toggle
+let SORT = 'view';          // 'view' | 'updated' | 'name' | 'images'
+let FILTER_SEL = 'all';     // the active single-select filter chip
+let RECENTS = {};           // "baseId/tableId" -> [{id, name}] last-opened records
+let VIEW_COUNTS = {};       // "baseId/tableId/viewId" -> "123" or "600+"
+let EXPANDED = new Set();   // record ids with the comment expanded (comfortable)
+let NOTES_OPEN = new Set(); // record ids with the comment shown (compact)
+
+// Must match ENGINE_VERSION in the Python file. The page reloads fresh from
+// disk on every visit, but the engine only changes on restart - when they
+// drift apart, say so plainly instead of failing in confusing ways.
+const PAGE_ENGINE = '2026-07-18';
+
+async function start() {
+  BOOT = await api('/api/boot');
+  if (BOOT.engine !== PAGE_ENGINE) {
+    const vn = $('verNote');
+    vn.style.display = 'block';
+    vn.textContent = 'This page and the app\'s engine are different versions (page ' +
+      PAGE_ENGINE + ', engine ' + (BOOT.engine || 'older') + '). Quit the app - press ' +
+      'Ctrl+C in its terminal window or close it - start it again, then reload this page.';
+  }
+  // running on a fallback port? the Airtable buttons point at 8765 and
+  // would knock on a door nobody answers - better say so up front
+  if (BOOT.port && BOOT.port !== 8765) {
+    const pn = $('portNote');
+    pn.style.display = 'block';
+    pn.textContent = 'Note: the app is running on port ' + BOOT.port + ' because its usual one ' +
+      '(8765) is taken by another program. The annotate buttons/links in Airtable point at 8765, ' +
+      'so they will not reach this window until that program is closed and the app is restarted.';
+  }
+  if (!BOOT.hasToken) { askToken(); return; }
+  instructionsOn = !!BOOT.remembered.instructionsOn || !!(DEEP && DEEP.instructionsField);
+  DENSITY = (BOOT.remembered.density === 'compact') ? 'compact' : 'comfy';
+  RECENTS = (BOOT.remembered.recentRecords &&
+             typeof BOOT.remembered.recentRecords === 'object')
+            ? BOOT.remembered.recentRecords : {};
+  syncDensityButtons();
+  TABLE_CHOICES = (BOOT.remembered.tableChoices &&
+                   typeof BOOT.remembered.tableChoices === 'object')
+                  ? BOOT.remembered.tableChoices : {};
+  myColors = (Array.isArray(BOOT.remembered.customColors) ? BOOT.remembered.customColors : [])
+    .filter(c => /^#[0-9a-f]{6}$/i.test(c)).slice(0, 8);
+  renderColorGrid();
+  $('chkNotes').checked = instructionsOn;
+  try {
+    const {bases} = await api('/api/bases');
+    fillSelect($('selBase'), bases, (DEEP && DEEP.baseId) || BOOT.remembered.baseId);
+    syncBaseTrig();
+    await baseChanged();
+    if (DEEP) {
+      // a link from Airtable brought us here - line up the dropdowns to
+      // match it, then go straight to that record
+      if (DEEP.tableId && [...$('selTable').options].some(o => o.value === DEEP.tableId)) {
+        $('selTable').value = DEEP.tableId; tableChanged();
+      }
+      // button links carry field NAMES (or ids) - resolve either to today's id
+      const dt = TABLES.find(x => x.id === $('selTable').value);
+      if (dt) for (const [sel, list, v] of [
+          [$('selImgField'), dt.attachmentFields, DEEP.imageField],
+          [$('selNameField'), dt.allFields, DEEP.nameField],
+          [$('selNotesField'), dt.textFields, DEEP.instructionsField]]) {
+        const id = fieldChoice(list, v);
+        if (id && [...sel.options].some(o => o.value === id)) sel.value = id;
+      }
+      loadGrid();
+    } else if (BOOT.remembered.baseId && BOOT.remembered.tableId) {
+      loadGrid();          // settings are remembered - straight to the pictures
+    } else {
+      openSettings();      // first run - choose base and table once
+    }
+  } catch (e) { say(e.message, true); }
+}
+
+// ---- the settings dialog -----------------------------------------------------
+let settingsSnapshot = null;   // how the dialog looked when it opened
+function openSettings() {
+  settingsSnapshot = {
+    base: $('selBase').value, table: $('selTable').value, view: $('selView').value,
+    img: $('selImgField').value, name: $('selNameField').value,
+    notes: $('selNotesField').value, chk: $('chkNotes').checked,
+    filter: $('selFilterField').value,
+  };
+  renderAppFields();
+  renderTokenRow();
+  syncBaseTrig();
+  $('tokenInput').value = '';
+  $('tokenEditRow').style.display = 'none';
+  $('settingsOverlay').classList.add('on');
+}
+$('btnSettings').onclick = openSettings;
+
+function renderTokenRow() {
+  $('tokenHintTxt').textContent = BOOT.tokenHint ||
+    (BOOT.hasToken ? 'a token is saved' : 'no token yet');
+  $('tokenState').textContent = BOOT.hasToken ? 'Connected' : 'Missing';
+  $('tokenState').style.color = BOOT.hasToken ? '#1db954' : '#e02020';
+}
+$('btnTokenReplace').onclick = () => {
+  const row = $('tokenEditRow');
+  const show = row.style.display === 'none';
+  row.style.display = show ? '' : 'none';
+  if (show) $('tokenInput').focus(); else $('tokenInput').value = '';
+};
+
+// The airtable.com token LIST only shows a token's short ID (17 chars, no
+// dot). The real token is ~82 chars with a dot in the middle, shown exactly
+// ONCE right after creating. Pasting the ID is the classic mix-up - catch it.
+function tokenLooksLikeJustTheId(tok) {
+  return tok.startsWith('pat') && !tok.includes('.') && tok.length < 30;
+}
+const TOKEN_ID_HINT = 'That looks like the token’s short ID, not the token itself. ' +
+  'Airtable shows the full token (about 80 characters, with a dot in the middle) ' +
+  'only ONCE — in the dialog right after you create or regenerate it at ' +
+  'airtable.com/create/tokens. Regenerate the token there and copy it from that dialog.';
+
+$('btnSettingsDone').onclick = async () => {
+  const tok = $('tokenInput').value.trim();
+  if (tok) {
+    if (tokenLooksLikeJustTheId(tok)) { say(TOKEN_ID_HINT, true); return; }
+    try {
+      await api('/api/token', {token: tok});
+      // a new token can see a different set of bases - start the page over
+      // so every list is fetched fresh with it
+      say('Token saved ✓ — reloading…', true);
+      location.reload();
+      return;
+    }
+    catch (e) { say(e.message, true); return; }
+  }
+  instructionsOn = $('chkNotes').checked;
+  if (settingsSnapshot && $('selFilterField').value !== settingsSnapshot.filter)
+    FILTER_SEL = 'all';                      // a new filter field starts on "All"
+  $('settingsOverlay').classList.remove('on');
+  DEEP = null;
+  loadGrid();
+};
+$('btnSettingsCancel').onclick = async () => {
+  $('tokenInput').value = '';                 // a typed token is discarded too
+  $('settingsOverlay').classList.remove('on');
+  const s = settingsSnapshot;
+  if (!s || !s.base) return;                  // nothing to restore (first run)
+  if ($('selBase').value !== s.base) {
+    $('selBase').value = s.base;
+    syncBaseTrig();
+    await baseChanged();                      // repopulates the table list
+  }
+  if ($('selTable').value !== s.table &&
+      [...$('selTable').options].some(o => o.value === s.table)) {
+    $('selTable').value = s.table;
+    tableChanged();                           // repopulates views and fields
+  }
+  for (const [sel, v] of [[$('selView'), s.view], [$('selImgField'), s.img],
+                          [$('selNameField'), s.name], [$('selNotesField'), s.notes],
+                          [$('selFilterField'), s.filter]])
+    if (v && [...sel.options].some(o => o.value === v)) sel.value = v;
+  $('chkNotes').checked = s.chk;
+};
+$('btnSettingsX').onclick = () => $('btnSettingsCancel').click();
+// clicking the dark backdrop (or pressing Esc) backs out - only Done commits
+$('settingsOverlay').onclick = e => {
+  if (e.target === $('settingsOverlay')) $('btnSettingsCancel').click();
+};
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && $('settingsOverlay').classList.contains('on')) {
+    // an open dropdown (the base picker) closes first; the dialog second
+    if (document.querySelector('#settingsBox .dd.open')) closeDropdowns();
+    else $('btnSettingsCancel').click();
+    e.stopPropagation();
+    e.preventDefault();
+  }
+}, true);
+
+// ---- the "Copy button formula" generator ---------------------------------------
+// The app knows every id the formula needs - nobody should hand-assemble
+// these (smart quotes, token mix-ups and stale names all start there).
+function buttonFormula() {
+  const t = TABLES.find(x => x.id === $('selTable').value);
+  const imgId = $('selImgField').value;
+  if (!t || !imgId) return null;
+  const imgF = t.attachmentFields.find(f => f.id === imgId);
+  const lines = [
+    'IF({' + (imgF ? imgF.name : 'IMAGES') + '},',
+    '  "http://127.0.0.1:8765/?baseId=' + $('selBase').value + '"',
+    '  & "&tableId=' + t.id + '"',
+    '  & "&recordId=" & RECORD_ID()',
+    '  & "&imageField=' + imgId + '"',
+  ];
+  if ($('selNameField').value) lines.push('  & "&nameField=' + $('selNameField').value + '"');
+  if ($('selNotesField').value) lines.push('  & "&instructionsField=' + $('selNotesField').value + '"');
+  lines.push(')');
+  return lines.join('\n');
+}
+$('btnCopyFormula').onclick = async () => {
+  const formula = buttonFormula();
+  if (!formula) { say('Pick a table and an image field first.'); return; }
+  try {
+    await navigator.clipboard.writeText(formula);
+  } catch (e) {
+    // clipboard access denied? the old-school way still works
+    const ta = document.createElement('textarea');
+    ta.value = formula;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+  }
+  say('Formula copied ✓ — in Airtable, add a Button field (action "Open URL") and paste it in.');
+};
+
+// the three fields the app manages, as glanceable status rows
+function renderAppFields() {
+  const t = TABLES.find(x => x.id === $('selTable').value);
+  const box = $('appFieldRows');
+  box.innerHTML = '';
+  if (!t) return;
+  const af = t.appFields || {};
+  const meta = [
+    ['json', BOOT.jsonField, 'hasJsonField', 'The index — which images have annotations.'],
+    ['asset', BOOT.assetField, 'hasAssetField', 'Hidden storage for the editable drawings and pasted pictures.'],
+    ['img', BOOT.imgField, 'hasImgField', 'The finished pictures — point print tools here.'],
+  ];
+  for (const [key, canonical, flag, desc] of meta) {
+    const ok = !!t[flag];
+    // fields are recognised even after a rename - show the CURRENT name
+    const name = (ok && af[key] && af[key].name) || canonical;
+    const row = document.createElement('div');
+    row.className = 'fieldRow';
+    row.innerHTML =
+      '<span class="fmark" style="background:' + (ok ? '#1db954' : 'var(--disabled)') + '">' +
+      (ok ? '✓' : '–') + '</span>' +
+      '<span class="fmeta"><span class="fname">' + escapeHtml(name) + '</span>' +
+      '<span class="fdesc">' + desc + '</span></span>' +
+      (ok ? '<span class="fok">In place</span>' : '<button class="fmake">Create</button>');
+    if (!ok) row.querySelector('.fmake').onclick = async ev => {
+      ev.target.disabled = true;
+      say('Creating ' + name + '…', true);
+      try {
+        const res = await api('/api/ensure_fields',
+                              {baseId: $('selBase').value, tableId: t.id, field: name});
+        if (res.problem) { say(res.problem, true); ev.target.disabled = false; return; }
+        t.hasJsonField = res.hasJsonField;
+        t.hasImgField = res.hasImgField;
+        t.hasAssetField = res.hasAssetField;
+        renderAppFields(); updateBanner(t);
+        say('Field created ✓');
+      } catch (e) { say(e.message, true); ev.target.disabled = false; }
+    };
+    box.appendChild(row);
+  }
+}
+
+function rememberChoices() {
+  if (DEEP) return;
+  if (CURRENT.tableId) {
+    TABLE_CHOICES[CURRENT.tableId] = {viewId: CURRENT.viewId,
+      imageField: CURRENT.imageField, nameField: CURRENT.nameField,
+      instructionsField: CURRENT.notesField, filterField: CURRENT.filterField};
+  }
+  api('/api/remember', {...CURRENT, instructionsField: CURRENT.notesField,
+                        instructionsOn, density: DENSITY, tableChoices: TABLE_CHOICES})
+    .catch(() => {});
+}
+
+async function baseChanged() {
+  const baseId = $('selBase').value;
+  say('Reading tables…', true);
+  try {
+    TABLES = (await api('/api/tables?baseId=' + baseId)).tables
+             .filter(t => t.attachmentFields.length);
+    if (!TABLES.length) {
+      // never leave the PREVIOUS base's tables sitting in the dropdowns -
+      // that looks like the base switch simply didn't happen
+      for (const sel of [$('selTable'), $('selView'), $('selImgField'),
+                         $('selNameField'), $('selNotesField'), $('selFilterField')])
+        fillSelect(sel, []);
+      $('filterFieldRow').style.display = 'none';
+      renderAppFields();
+      say('No table in this base has an attachment (image) field yet. Add an ' +
+          'attachment field with images in Airtable, then press the ↻ button next to Base.', true);
+      return;
+    }
+    fillSelect($('selTable'), TABLES, BOOT.remembered.tableId);
+    tableChanged();
+    hideSay();
+  } catch (e) { say(e.message, true); }
+}
+
+// ---- the searchable base picker ------------------------------------------------
+// The hidden <select id="selBase"> stays the single source of truth - the picker
+// is only a friendlier face on it, so every other part of the app is untouched.
+function syncBaseTrig() {
+  const o = $('selBase').selectedOptions[0];
+  $('baseTrigLabel').textContent = o ? o.textContent : '—';
+}
+
+function renderBaseList() {
+  const q = $('baseSearch').value.trim().toLowerCase();
+  const box = $('baseList');
+  box.innerHTML = '';
+  let shown = 0;
+  for (const o of [...$('selBase').options]) {
+    if (q && !o.textContent.toLowerCase().includes(q)) continue;
+    shown++;
+    const row = document.createElement('span');
+    row.className = 'ddRow' + (o.value === $('selBase').value ? ' sel' : '');
+    row.innerHTML = '<span style="overflow:hidden; text-overflow:ellipsis;">' +
+                    escapeHtml(o.textContent) + '</span><span class="check">✓</span>';
+    row.onclick = () => {
+      closeDropdowns();
+      if ($('selBase').value !== o.value) {
+        $('selBase').value = o.value;
+        syncBaseTrig();
+        baseChanged();
+      }
+    };
+    box.appendChild(row);
+  }
+  if (!shown)
+    box.innerHTML = '<span class="ddRow" style="color:var(--muted); cursor:default">No base matches</span>';
+}
+$('baseSearch').oninput = renderBaseList;
+// Enter picks the first (visible) match - type, Enter, done
+$('baseSearch').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    const first = $('baseList').querySelector('.ddRow');
+    if (first && first.onclick) first.onclick();
+    e.preventDefault();
+  }
+});
+
+$('btnReloadBases').onclick = async () => {
+  const keep = $('selBase').value;
+  const keepTable = $('selTable').value;
+  say('Reading bases…', true);
+  try {
+    const {bases} = await api('/api/bases');
+    fillSelect($('selBase'), bases, keep);
+    syncBaseTrig();
+    // "reload" means everything: also re-read the selected base's tables,
+    // views and FIELD NAMES - after a rename in Airtable, this is the
+    // button that makes the new names show up in the dropdowns below
+    await baseChanged();
+    if (keepTable && $('selTable').value !== keepTable &&
+        [...$('selTable').options].some(o => o.value === keepTable)) {
+      $('selTable').value = keepTable;
+      tableChanged();
+    }
+    if (TABLES.length) say('Bases, tables and field names refreshed ✓');
+  } catch (e) { say(e.message, true); }
+};
+
+// A remembered field reference may be a field ID (how the app stores choices
+// now - rename-proof) or a NAME (older settings, button links). Map either
+// onto the field's current id; '' when the field is truly gone.
+function fieldChoice(list, ref) {
+  if (!ref) return '';
+  const hit = (list || []).find(f => f.id === ref) || (list || []).find(f => f.name === ref);
+  return hit ? hit.id : '';
+}
+// the current display name of a field, for messages and panel titles
+function fieldName(fieldId) {
+  const t = TABLES.find(x => x.id === CURRENT.tableId);
+  const f = t && (t.allFields || []).find(x => x.id === fieldId);
+  return f ? f.name : '';
+}
+
+function tableChanged() {
+  const t = TABLES.find(x => x.id === $('selTable').value);
+  if (!t) return;
+  // every table remembers ITS OWN last-used view and fields - switching to
+  // another table and back must never quietly land on different ones
+  const tc = TABLE_CHOICES[t.id] || {};
+  fillSelect($('selView'), t.views, tc.viewId || BOOT.remembered.viewId);
+  fillSelect($('selImgField'), t.attachmentFields,
+             fieldChoice(t.attachmentFields, tc.imageField || BOOT.remembered.imageField));
+  fillSelect($('selNameField'), t.allFields,
+             fieldChoice(t.allFields, tc.nameField || BOOT.remembered.nameField));
+  fillSelect($('selNotesField'), [{id: '', name: '— None —'}].concat(t.textFields),
+             fieldChoice(t.textFields, tc.instructionsField || BOOT.remembered.instructionsField));
+  // the single-select filter: only offered when the table has such a field
+  $('filterFieldRow').style.display = (t.selectFields || []).length ? '' : 'none';
+  fillSelect($('selFilterField'), [{id: '', name: '— None —'}].concat(t.selectFields || []),
+             fieldChoice(t.selectFields, tc.filterField || ''));
+  updateBanner(t);
+  renderAppFields();
+}
+
+function updateBanner(t) {
+  const banner = $('banner');
+  if (t.hasJsonField && t.hasImgField && t.hasAssetField) { banner.style.display = 'none'; return; }
+  banner.style.display = 'block';
+  banner.innerHTML = 'This table is missing the two helper fields the annotator saves into ' +
+    '(<b>ANNOTATIONS DATA</b> and <b>ANNOTATED IMAGES</b>). ' +
+    '<button id="btnMakeFields" class="primary">Create them for me</button>';
+  $('btnMakeFields').onclick = async () => {
+    say('Creating fields…', true);
+    try {
+      const res = await api('/api/ensure_fields', {baseId: $('selBase').value, tableId: t.id});
+      if (res.problem) {
+        banner.innerHTML = 'Airtable would not let the app create the fields. ' +
+          'Either give your token the <b>schema.bases:write</b> permission at ' +
+          '<b>airtable.com/create/tokens</b>, or add these two fields to the table yourself: ' +
+          '<b>ANNOTATIONS DATA</b> (Long text) and <b>ANNOTATED IMAGES</b> (Attachment). ' +
+          'Then choose the table again.';
+        say(res.problem, true);
+      } else {
+        t.hasJsonField = t.hasImgField = t.hasAssetField = true;
+        banner.style.display = 'none';
+        say('Fields created ✓');
+      }
+    } catch (e) { say(e.message, true); }
+  };
+}
+
+async function loadGrid() {
+  const t = TABLES.find(x => x.id === $('selTable').value);
+  const notesField = $('selNotesField').value || '';
+  CURRENT = {
+    baseId: $('selBase').value, tableId: $('selTable').value, viewId: $('selView').value,
+    imageField: $('selImgField').value, nameField: $('selNameField').value,
+    notesField,                                            // shown on the list rows
+    instructionsField: instructionsOn ? notesField : '',   // shown in the editor panel
+    filterField: $('selFilterField').value || '',
+    modifiedField: (t && t.modifiedField) || '',
+  };
+  if (!CURRENT.baseId || !CURRENT.tableId || !CURRENT.imageField) {
+    say('Still reading the table list from Airtable - give it a few seconds, then press Refresh.');
+    return;
+  }
+  rememberChoices();
+  renderRail();
+  renderCapOff = false;    // a fresh load starts capped again
+  say('Loading images…', true);
+  try {
+    const params = {baseId: CURRENT.baseId, tableId: CURRENT.tableId,
+      imageField: CURRENT.imageField, nameField: CURRENT.nameField,
+      notesField: CURRENT.notesField, filterField: CURRENT.filterField,
+      modifiedField: CURRENT.modifiedField};
+    LAST_PARAMS = params;
+    if (DEEP) {
+      ALL_RECORDS = [await api('/api/record?' + new URLSearchParams({...params, recordId: DEEP.recordId}))];
+      MORE_OFFSET = null;
+    } else {
+      const res = await api('/api/records?' + new URLSearchParams({...params, viewId: CURRENT.viewId}));
+      ALL_RECORDS = res.records;
+      MORE_OFFSET = res.offset || null;   // more than 600 records? they keep
+      updateViewCount();                  // loading as the list scrolls
+    }
+    applyFilter();
+    hideSay();
+    fillViewport();
+    // came from an Airtable link? then open the editor right away -
+    // one click in Airtable, ready to draw (the filmstrip covers the rest).
+    if (DEEP && !DEEP.autoOpened) {
+      DEEP.autoOpened = true;
+      const r = ALL_RECORDS[0];
+      if (r && r.images.length) openEditor(r, r.images[0]);
+    }
+  } catch (e) { say(e.message, true); }
+}
+
+// ---- the rail: views, filters and recent records --------------------------------
+function recentKey() { return CURRENT.baseId + '/' + CURRENT.tableId; }
+function viewCountKey(viewId) {
+  return CURRENT.baseId + '/' + CURRENT.tableId + '/' + (viewId || '');
+}
+function updateViewCount() {
+  if (!CURRENT.baseId) return;
+  // count what the list shows - records WITH images - so the rail number
+  // always matches the headline count
+  const n = ALL_RECORDS.filter(r => r.images.length).length;
+  VIEW_COUNTS[viewCountKey(CURRENT.viewId)] = MORE_OFFSET ? n + '+' : String(n);
+}
+
+function renderRail() {
+  const t = TABLES.find(x => x.id === $('selTable').value);
+  $('railTitle').textContent = t ? t.name : 'Pictures';
+  const baseName = ($('selBase').selectedOptions[0] || {}).textContent || '';
+  $('crumb').textContent = [baseName, t && t.name].filter(Boolean).join(' › ');
+
+  // the table's Airtable views - clicking switches without a trip to Settings
+  const vbox = $('railViews');
+  vbox.innerHTML = '';
+  if (t) for (const v of t.views) {
+    const el = document.createElement('span');
+    el.className = 'railView' + (v.id === CURRENT.viewId ? ' sel' : '');
+    el.tabIndex = 0;
+    el.setAttribute('role', 'button');
+    el.innerHTML =
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+      '<path d="M4 6h16M4 12h10M4 18h6"/></svg>' +
+      '<span class="vname">' + escapeHtml(v.name) + '</span>' +
+      '<span class="vcount">' + (VIEW_COUNTS[viewCountKey(v.id)] || '') + '</span>';
+    el.onclick = () => {
+      if (v.id === CURRENT.viewId) return;
+      $('selView').value = v.id;
+      DEEP = null;
+      FILTER_SEL = 'all';
+      loadGrid();
+    };
+    vbox.appendChild(el);
+  }
+
+  // the single-select filter, when one is chosen under Settings
+  const sec = $('railFilterSec');
+  const meta = t && CURRENT.filterField
+    ? (t.selectFields || []).find(f => f.id === CURRENT.filterField) : null;
+  if (meta) {
+    sec.style.display = '';
+    $('railFilterName').textContent = meta.name;
+    const cbox = $('railFilterChips');
+    cbox.innerHTML = '';
+    const loaded = ALL_RECORDS.filter(r => r.images.length);
+    const opts = [['all', 'All', loaded.length]].concat(meta.choices.map(c =>
+      [c, c, loaded.filter(r => (r.filterValue || '') === c).length]));
+    for (const [val, label, n] of opts) {
+      const el = document.createElement('span');
+      el.className = 'railChip' + (FILTER_SEL === val ? ' sel' : '');
+      el.tabIndex = 0;
+      el.setAttribute('role', 'button');
+      el.innerHTML = escapeHtml(label) +
+        '<span class="vcount">' + n + (MORE_OFFSET ? '+' : '') + '</span>';
+      el.onclick = () => { FILTER_SEL = val; applyFilter(); };
+      cbox.appendChild(el);
+    }
+  } else {
+    sec.style.display = 'none';
+    if (FILTER_SEL !== 'all') FILTER_SEL = 'all';
+  }
+
+  // recently opened records
+  const rbox = $('railRecent');
+  rbox.innerHTML = '';
+  const list = (RECENTS[recentKey()] || []).slice(0, 5);
+  if (!list.length) {
+    rbox.innerHTML = '<div class="railNone">Nothing opened yet.</div>';
+  } else for (const it of list) {
+    const el = document.createElement('span');
+    el.className = 'railRecent';
+    el.textContent = it.name;
+    el.title = it.name;
+    el.tabIndex = 0;
+    el.setAttribute('role', 'button');
+    el.onclick = () => openRecent(it);
+    rbox.appendChild(el);
+  }
+}
+
+async function openRecent(it) {
+  const rec = ALL_RECORDS.find(r => r.id === it.id);
+  if (rec && rec.images.length) { openEditor(rec, rec.images[0]); return; }
+  say('Loading “' + it.name + '”…', true);   // not in the loaded list - fetch it alone
+  try {
+    const r = await api('/api/record?' + new URLSearchParams({...LAST_PARAMS, recordId: it.id}));
+    hideSay();
+    if (r.images.length) openEditor(r, r.images[0]);
+    else say('That record has no images any more.');
+  } catch (e) { say(e.message, true); }
+}
+
+function noteRecent(record) {
+  if (!CURRENT.baseId || !record) return;
+  const k = recentKey();
+  const list = (RECENTS[k] || []).filter(x => x.id !== record.id);
+  list.unshift({id: record.id, name: record.name});
+  RECENTS[k] = list.slice(0, 8);
+  api('/api/remember', {recentRecords: RECENTS}).catch(() => {});
+}
+
+// ---- finding the right record among hundreds ----------------------------------
+let ALL_RECORDS = [], MORE_OFFSET = null, LAST_PARAMS = null;
+
+function applyFilter() {
+  const q = $('searchBox').value.trim().toLowerCase();
+  const chips = new Map();   // record id -> "matches IMG_1234.jpg"
+  let recs = ALL_RECORDS.filter(r => r.images.length);
+  if (CURRENT.filterField && FILTER_SEL !== 'all')
+    recs = recs.filter(r => (r.filterValue || '') === FILTER_SEL);
+  if (q) recs = recs.filter(r => {
+    if ((r.name + ' ' + (r.notes || '')).toLowerCase().includes(q)) return true;
+    const im = r.images.find(i => (i.filename || '').toLowerCase().includes(q));
+    if (im) { chips.set(r.id, 'matches ' + im.filename); return true; }
+    return false;
+  });
+  recs = sortRecords(recs);
+  renderList(recs, chips);
+  renderRail();
+  updateHeadline(recs.length, q);
+  $('empty').textContent = !ALL_RECORDS.some(r => r.images.length)
+    ? 'No images found here. Check the view and image field under Settings, ' +
+      'or add images in Airtable and press Refresh.'
+    : q
+      ? (MORE_OFFSET ? 'No matches yet — still searching the rest of the table…'
+                     : 'Nothing matches — the search covered every record in Airtable.')
+      : 'No records with ' + (fieldName(CURRENT.filterField) || 'that filter') +
+        ' “' + FILTER_SEL + '”.';
+  $('empty').style.display = recs.length ? 'none' : 'block';
+  // typing a search widens it to EVERYTHING - load the rest of the table too
+  if (q && MORE_OFFSET) loadEverythingForSearch();
+}
+// a short breath after each keystroke, so fast typing in a big table
+// doesn't rebuild the whole list six times per word
+let searchTimer = null;
+$('searchBox').oninput = () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(applyFilter, 150);
+};
+
+function sortRecords(recs) {
+  const arr = recs.slice();   // 'view' keeps Airtable's own order (as loaded)
+  if (SORT === 'name') arr.sort((a, b) => a.name.localeCompare(b.name));
+  else if (SORT === 'images') arr.sort((a, b) => b.images.length - a.images.length);
+  else if (SORT === 'updated') arr.sort((a, b) => parseWhen(b.updated) - parseWhen(a.updated));
+  return arr;
+}
+function parseWhen(s) {
+  if (!s) return 0;
+  const d = new Date(String(s).replace(' ', 'T'));   // app stamps have no 'T'
+  return isNaN(d) ? 0 : d.getTime();
+}
+const WHEN_TIP = {modified: 'Last change in Airtable', annotated: 'Last annotated here',
+                  created: 'Record created'};
+function whenLabel(s) {
+  const ts = parseWhen(s);
+  if (!ts) return '';
+  const d = new Date(ts), now = new Date();
+  const day = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((day(now) - day(d)) / 86400000);
+  if (days <= 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  if (days < 7) return days + ' days ago';
+  if (days < 14) return 'Last week';
+  if (days < 31) return Math.round(days / 7) + ' weeks ago';
+  if (days < 62) return 'Last month';
+  return d.toLocaleDateString(undefined,
+    d.getFullYear() === now.getFullYear() ? {day: 'numeric', month: 'short'}
+                                          : {month: 'short', year: 'numeric'});
+}
+
+function updateHeadline(shown, q) {
+  $('headline').textContent = q
+    ? (MORE_OFFSET ? shown + ' so far — still searching…'
+                   : shown + (shown === 1 ? ' match' : ' matches') + ' across all of Airtable')
+    : shown + (shown === 1 ? ' record' : ' records') + (MORE_OFFSET ? ' so far' : '');
+  $('footRight').textContent = MORE_OFFSET
+    ? (q ? 'searching — ' + ALL_RECORDS.length + ' records checked so far…'
+         : 'records keep loading as you scroll')
+    : 'all ' + ALL_RECORDS.length + ' records checked — ' +
+      ALL_RECORDS.filter(r => r.images.length).length + ' have images';
+}
+
+// Airtable's thumbnail links expire after a couple of hours. In a window
+// left open overnight the list would come back grey - so the first broken
+// thumbnail quietly reloads the list, which fetches fresh links for all of
+// them. At most once per 5 minutes, and never while the editor is open.
+let lastThumbHeal = 0;
+function thumbFailed() {
+  const now = Date.now();
+  if (now - lastThumbHeal < 300000) return;
+  if ($('editor').style.display === 'flex') return;
+  if (!CURRENT.baseId) return;
+  lastThumbHeal = now;
+  loadGrid();
+}
+
+// ---- the list itself: comfortable or compact rows -------------------------------
+// Thousands of DOM rows make typing sticky, so the list renders at most
+// RENDER_CAP rows and says so - counts and search always cover everything.
+const RENDER_CAP = 400;
+let renderCapOff = false;   // "Show all" was pressed; reset on every reload
+
+function renderList(records, chips) {
+  const grid = $('grid');
+  grid.innerHTML = '';
+  const capped = !renderCapOff && records.length > RENDER_CAP;
+  const shown = capped ? records.slice(0, RENDER_CAP) : records;
+  const frag = document.createDocumentFragment();
+  for (const r of shown)
+    frag.appendChild(DENSITY === 'compact' ? compactRow(r, chips) : comfyRow(r, chips));
+  if (capped) {
+    const tail = document.createElement('div');
+    tail.style.cssText = 'padding:14px 16px; font-size:12px; color:var(--muted); ' +
+                         'display:flex; align-items:center; gap:10px;';
+    tail.innerHTML = 'Showing the first ' + RENDER_CAP + ' of ' + records.length +
+      ' rows — search or filter to narrow down. ';
+    const btn = document.createElement('button');
+    btn.textContent = 'Show all ' + records.length;
+    btn.style.cssText = 'font-size:12px; padding:5px 10px;';
+    btn.onclick = () => { renderCapOff = true; applyFilter(); };
+    tail.appendChild(btn);
+    frag.appendChild(tail);
+  }
+  grid.appendChild(frag);
+}
+
+// one little square per image - green means annotated; clicking opens THAT image
+function dotsEl(r) {
+  const wrap = document.createElement('span');
+  wrap.className = 'dotsWrap' + (DENSITY === 'compact' ? ' small' : '');
+  for (const im of r.images) {
+    const d = document.createElement('span');
+    d.className = 'imgDot' + (im.annotated ? ' on' : '');
+    d.dataset.tip = im.filename + (im.annotated ? ' — annotated' : '');
+    d.tabIndex = 0;
+    d.setAttribute('role', 'button');
+    d.setAttribute('aria-label', 'Open ' + im.filename + (im.annotated ? ' (annotated)' : ''));
+    d.onclick = e => { e.stopPropagation(); openEditor(r, im); };
+    wrap.appendChild(d);
+  }
+  return wrap;
+}
+function whenEl(r, cls) {
+  const el = document.createElement('span');
+  el.className = cls;
+  el.textContent = whenLabel(r.updated);
+  if (el.textContent && r.updatedSource && WHEN_TIP[r.updatedSource])
+    el.dataset.tip = WHEN_TIP[r.updatedSource];
+  return el;
+}
+
+function comfyRow(r, chips) {
+  const row = document.createElement('div');
+  row.className = 'recRow';
+  const chip = chips.get(r.id);
+  const open = EXPANDED.has(r.id);
+  const isLong = (r.notes || '').length > 110;
+  row.innerHTML =
+    '<img class="thumb" loading="lazy" src="' + escapeHtml(r.images[0].thumb || '') + '">' +
+    '<div class="recBody"><div class="recHead">' +
+    '<span class="recName">' + escapeHtml(r.name) + '</span>' +
+    '<span class="recCount">' + r.images.length + (r.images.length > 1 ? ' images' : ' image') + '</span>' +
+    (chip ? '<span class="matchChip">' + escapeHtml(chip) + '</span>' : '') +
+    '</div>' +
+    (r.notes
+      ? '<span class="recNotes' + (open ? ' open' : '') + '">' + escapeHtml(r.notes) + '</span>' +
+        (isLong ? '<span class="moreLink">' + (open ? 'Show less' : 'Show more') + '</span>' : '')
+      : '') +
+    '</div>';
+  row.appendChild(dotsEl(r));
+  row.appendChild(whenEl(r, 'recWhen'));
+  const thumb = row.querySelector('.thumb');
+  if (thumb && thumb.getAttribute('src')) thumb.onerror = thumbFailed;
+  const more = row.querySelector('.moreLink');
+  if (more) {
+    more.tabIndex = 0;
+    more.setAttribute('role', 'button');
+    more.onclick = e => {
+      e.stopPropagation();
+      EXPANDED.has(r.id) ? EXPANDED.delete(r.id) : EXPANDED.add(r.id);
+      applyFilter();
+    };
+  }
+  row.tabIndex = 0;
+  row.setAttribute('role', 'button');
+  row.setAttribute('aria-label', 'Open ' + r.name);
+  row.onclick = () => openEditor(r, r.images[0]);
+  return row;
+}
+
+function compactRow(r, chips) {
+  const wrap = document.createElement('div');
+  wrap.className = 'cWrap';
+  const row = document.createElement('div');
+  row.className = 'recRowC';
+  const chip = chips.get(r.id);
+  row.innerHTML =
+    '<img class="thumbC" loading="lazy" src="' + escapeHtml(r.images[0].thumb || '') + '">' +
+    '<span class="recNameC">' + escapeHtml(r.name) + '</span>' +
+    (chip ? '<span class="matchChip">' + escapeHtml(chip) + '</span>' : '');
+  if (r.notes) {
+    const b = document.createElement('button');
+    b.className = 'noteBtn' + (NOTES_OPEN.has(r.id) ? ' on' : '');
+    b.dataset.tip = NOTES_OPEN.has(r.id) ? 'Hide the comment' : 'Show the comment';
+    b.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+                  'stroke-width="2"><path d="M21 12a8 8 0 0 1-8 8H4l2-3a8 8 0 1 1 15-5z"/></svg>';
+    b.onclick = e => {
+      e.stopPropagation();
+      NOTES_OPEN.has(r.id) ? NOTES_OPEN.delete(r.id) : NOTES_OPEN.add(r.id);
+      applyFilter();
+    };
+    row.appendChild(b);
+  }
+  const sp = document.createElement('span');
+  sp.className = 'cSpacer';
+  row.appendChild(sp);
+  row.appendChild(dotsEl(r));
+  row.appendChild(whenEl(r, 'recWhenC'));
+  const thumbC = row.querySelector('.thumbC');
+  if (thumbC && thumbC.getAttribute('src')) thumbC.onerror = thumbFailed;
+  row.tabIndex = 0;
+  row.setAttribute('role', 'button');
+  row.setAttribute('aria-label', 'Open ' + r.name);
+  row.onclick = () => openEditor(r, r.images[0]);
+  wrap.appendChild(row);
+  if (r.notes && NOTES_OPEN.has(r.id)) {
+    const n = document.createElement('div');
+    n.className = 'cNote';
+    n.textContent = r.notes;
+    wrap.appendChild(n);
+  }
+  return wrap;
+}
+
+// ---- loading the rest of a big table --------------------------------------------
+let loadingMore = false, searchLoadActive = false;
+
+async function loadMoreRecords() {
+  if (!MORE_OFFSET || !LAST_PARAMS || loadingMore || DEEP) return true;
+  loadingMore = true;
+  try {
+    const res = await api('/api/records?' + new URLSearchParams(
+      {...LAST_PARAMS, viewId: CURRENT.viewId, offset: MORE_OFFSET}));
+    ALL_RECORDS = ALL_RECORDS.concat(res.records);
+    MORE_OFFSET = res.offset || null;
+    updateViewCount();
+    applyFilter();
+    return true;
+  } catch (e) {
+    say('Could not load more records: ' + e.message);
+    return false;
+  } finally { loadingMore = false; }
+}
+
+// the mock's promise - "the search covered every record in Airtable" - is kept
+// by loading the remaining pages the moment a search begins
+async function loadEverythingForSearch() {
+  if (searchLoadActive) return;
+  searchLoadActive = true;
+  try {
+    while (MORE_OFFSET && $('searchBox').value.trim())
+      if (!await loadMoreRecords()) break;
+  } finally { searchLoadActive = false; }
+}
+
+$('listScroll').addEventListener('scroll', () => {
+  const el = $('listScroll');
+  if (el.scrollTop + el.clientHeight > el.scrollHeight - 600) loadMoreRecords();
+});
+// belt and braces: a sentinel at the very bottom of the list. Whenever it comes
+// within 600px of view - by scrolling, resizing, or the list being short - the
+// next page loads. Unlike the scroll listener this also fires after re-renders.
+new IntersectionObserver(entries => {
+  if (entries.some(e => e.isIntersecting)) loadMoreRecords();
+}, {root: $('listScroll'), rootMargin: '600px'}).observe($('scrollSentinel'));
+// a short list under a tall window? keep loading until it fills (or runs out)
+function fillViewport() {
+  const el = $('listScroll');
+  if (MORE_OFFSET && !loadingMore && el.scrollHeight <= el.clientHeight + 40)
+    loadMoreRecords().then(ok => { if (ok && MORE_OFFSET) fillViewport(); });
+}
+
+// Coming back from Airtable? The list quietly reloads, so whatever was just
+// changed over there (new photos, edited comments) is already in view.
+// Never while the editor is open, at most once a minute, keeping the scroll.
+let lastFocusRefresh = Date.now();
+window.addEventListener('focus', () => {
+  if ($('editor').style.display === 'flex') return;
+  if ($('settingsOverlay').classList.contains('on')) return;
+  if (!CURRENT.baseId || DEEP) return;
+  const now = Date.now();
+  if (now - lastFocusRefresh < 60000) return;
+  lastFocusRefresh = now;
+  const st = $('listScroll').scrollTop;
+  loadGrid().then(() => { $('listScroll').scrollTop = st; });
+});
+
+// keyboard: Enter (or Space) activates whatever list control has focus
+document.addEventListener('keydown', e => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches &&
+      e.target.matches('.recRow,.recRowC,.imgDot,.moreLink,.railView,.railChip,.railRecent')) {
+    e.preventDefault();
+    e.target.click();
+  }
+});
+
+// ---- sort and density controls ---------------------------------------------------
+const SORT_OPTIONS = [['view', 'View order (Airtable)'], ['updated', 'Recently updated'],
+                      ['name', 'Name A–Z'], ['images', 'Most images']];
+function renderSortMenu() {
+  const m = $('sortMenu');
+  m.innerHTML = '';
+  for (const [key, label] of SORT_OPTIONS) {
+    const row = document.createElement('span');
+    row.className = 'ddRow' + (SORT === key ? ' sel' : '');
+    row.innerHTML = escapeHtml(label) + '<span class="check">✓</span>';
+    row.onclick = () => {
+      SORT = key;
+      $('sortLabel').textContent = key === 'view' ? 'View order' : label;
+      closeDropdowns();
+      renderSortMenu();
+      applyFilter();
+    };
+    m.appendChild(row);
+  }
+}
+renderSortMenu();
+
+function syncDensityButtons() {
+  $('btnComfy').classList.toggle('active', DENSITY === 'comfy');
+  $('btnCompact').classList.toggle('active', DENSITY === 'compact');
+}
+function setDensity(d) {
+  if (DENSITY === d) return;
+  DENSITY = d;
+  syncDensityButtons();
+  api('/api/remember', {density: DENSITY}).catch(() => {});
+  applyFilter();
+  fillViewport();   // compact fits far more rows - top up if needed
+}
+$('btnComfy').onclick = () => setDensity('comfy');
+$('btnCompact').onclick = () => setDensity('compact');
+syncDensityButtons();
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+
+function askToken() {
+  const tok = (prompt('Paste your Airtable personal access token.\n\n' +
+    'You can create or edit tokens at airtable.com/create/tokens.\n' +
+    'Copy the token from the dialog shown right after creating it - the\n' +
+    'token list page only shows its short ID, which will not work.\n' +
+    'The token needs these scopes: data.records:read, data.records:write,\n' +
+    'schema.bases:read, schema.bases:write - plus access to your bases.') || '').trim();
+  if (tok && tokenLooksLikeJustTheId(tok)) { say(TOKEN_ID_HINT, true); return; }
+  if (tok) api('/api/token', {token: tok}).then(() => location.reload())
+                                          .catch(e => say(e.message, true));
+}
+
+$('selBase').onchange = baseChanged;
+$('selTable').onchange = tableChanged;
+// Refresh re-reads the table's SCHEMA too, not just the records - so fields
+// renamed in Airtable show up here, instead of erroring on stale names
+$('btnLoad').onclick = async () => {
+  DEEP = null;
+  const curTable = $('selTable').value;
+  await baseChanged();
+  if (curTable && $('selTable').value !== curTable &&
+      [...$('selTable').options].some(o => o.value === curTable)) {
+    $('selTable').value = curTable;
+    tableChanged();
+  }
+  if (TABLES.length) loadGrid();
+};
+
+// ---------------------------------------------------------------------------
+// screen 2 - the editor
+// ---------------------------------------------------------------------------
+const COLORS = ['#111111','#e02020','#ff8a00','#ffd400','#1db954','#2d7ff9','#8f3ee8','#ffffff'];
+let canvas = null;          // the fabric drawing surface
+let bgImage = null;         // the original picture (never exported to JSON)
+let imgW = 0, imgH = 0;     // its size in real pixels
+let tool = 'select';
+let color = '#e02020';
+let editing = null;         // {record, img} currently open
+let dirty = false;          // anything changed since the last save?
+let undoStack = [];
+let redoStack = [];         // what Undo took away, ready to come back
+let restoring = false;      // true while we rebuild the canvas from JSON
+const KEEP_PROPS = ['isCropRect', 'assetAttId', 'isMarker', 'markerNum', 'textStyle',
+                    'isBlurZone', 'blurPx', 'blurSmooth', 'isSpotlight',
+                    'isArrow', 'arrowHeads', 'arrowCurved',
+                    'ax1', 'ay1', 'ax2', 'ay2', 'acx', 'acy'];   // custom props that survive save/load
+let origBitmap = null;      // the untouched downloaded photo
+let bgEl = null;            // what is actually shown (photo, possibly rotated)
+let imgRotation = 0;        // 0 / 90 / 180 / 270
+let dashOn = false;         // draw dashed lines?
+
+// ---- dropdowns: open on trigger click, any click elsewhere closes ------------
+function closeDropdowns() {
+  document.querySelectorAll('.dd.open').forEach(d => d.classList.remove('open'));
+}
+document.addEventListener('click', e => {
+  const dd = e.target.closest('.dd');
+  if (!dd) { closeDropdowns(); return; }
+  if (e.target.closest('.ddTrig')) {
+    const wasOpen = dd.classList.contains('open');
+    closeDropdowns();
+    if (!wasOpen) {
+      dd.classList.add('open');
+      if (dd.id === 'ddFontStyle') refreshStyleMenu();
+      if (dd.id === 'ddBase') {                     // the base picker: fresh
+        $('baseSearch').value = '';                 // list, cursor in the search
+        renderBaseList();
+        setTimeout(() => $('baseSearch').focus(), 0);
+      }
+      const sel = dd.querySelector('.ddMenu .sel');
+      if (sel && sel.scrollIntoView) sel.scrollIntoView({block: 'nearest'});
+    }
+  }
+});
+
+function applyColor(c) {
+  if (tool === 'hl') hlColor = c; else if (tool !== 'marker') color = c;
+  if (tool === 'marker' || (canvas && canvas.getActiveObjects().some(o => o.isMarker)))
+    markerColor = c;         // the next marker starts in this color
+  $('colorDisc').style.background = c;
+  document.querySelectorAll('#colorGrid .csw').forEach(x =>
+    x.classList.toggle('sel', x.dataset.c === c));
+  applyToSelection(o => {
+    if (o.isMarker) {
+      o.getObjects()[0].set('fill', c);    // the marker's circle
+      o.dirty = true;
+    } else if (o.type === 'i-text') {
+      if (o.textStyle) applyStyleToText(o, o.textStyle, c);
+      else {
+        o.set('fill', c);
+        if (o.textBackgroundColor) o.set('textBackgroundColor', pillColorFor(c));
+      }
+    } else if (o.type === 'image') {
+      if (o.stroke) o.set('stroke', c);    // a bordered picture recolors its outline
+    } else if (!o.isBlurZone && !o.isSpotlight) {
+      o.set('stroke', c);
+      if (isFilled(o)) o.set('fill', c);   // filled shapes change color as one
+    }
+  });
+  configureBrush();
+}
+
+// The color disc and opacity label follow the active tool - the highlighter
+// shows ITS color and see-through level, everything else the shared ones.
+function refreshTriggerDisplays() {
+  const c = tool === 'hl' ? hlColor : (tool === 'marker' ? markerColor : color);
+  $('colorDisc').style.background = c;
+  document.querySelectorAll('#colorGrid .csw').forEach(x =>
+    x.classList.toggle('sel', x.dataset.c === c));
+  const pc = tool === 'hl' ? hlOpacity
+           : tool === 'marker' ? markerOpacity
+           : (tool === 'text' ? textOpacity : opacChoice);
+  $('opacLabel').textContent = pc + '%';
+  document.querySelectorAll('#opacMenu .ddRow').forEach((x, i) =>
+    x.classList.toggle('sel', [25, 50, 75, 100][i] === pc));
+  renderWeightMenu();
+  updateWeightTrigger();
+}
+// The color grid: eight fixed colors, then "my colors" - anything picked in
+// the system color picker, remembered in the settings file across sessions
+// (newest first, up to eight) - and an "Add to my colors" button below.
+let myColors = [];
+function renderColorGrid() {
+  const grid = $('colorGrid');
+  grid.innerHTML = '';
+  const cur = tool === 'hl' ? hlColor : color;
+  for (const c of COLORS.concat(myColors)) {
+    const b = document.createElement('button');
+    b.className = 'csw' + (c === cur ? ' sel' : '');
+    b.dataset.c = c;
+    b.style.background = c;
+    b.onclick = () => { applyColor(c); closeDropdowns(); };
+    grid.appendChild(b);
+  }
+}
+(function buildColorMenu() {
+  const inp = document.createElement('input');
+  inp.type = 'color';
+  inp.style.cssText = 'position:absolute; width:0; height:0; opacity:0; border:0; padding:0';
+  inp.onchange = () => {              // fires when the system picker confirms
+    const c = inp.value.toLowerCase();
+    if (!COLORS.includes(c)) {
+      myColors = [c].concat(myColors.filter(x => x !== c)).slice(0, 8);
+      api('/api/remember', {customColors: myColors}).catch(() => {});
+    }
+    renderColorGrid();                // the new swatch appears immediately...
+    applyColor(c);                    // ...selected, and the menu stays open
+  };
+  const add = document.createElement('button');
+  add.id = 'cswAdd';
+  add.type = 'button';
+  add.textContent = '+ Add to my colors…';
+  add.onclick = () => {
+    const cur = tool === 'hl' ? hlColor : color;
+    inp.value = /^#[0-9a-f]{6}$/i.test(cur) ? cur : '#e02020';
+    inp.click();
+  };
+  const menu = $('ddColor').querySelector('.ddMenu');
+  menu.appendChild(add);
+  menu.appendChild(inp);
+  renderColorGrid();
+  $('colorDisc').style.background = color;
+})();
+
+function applyToSelection(fn) {
+  if (!canvas) return;
+  const objs = canvas.getActiveObjects();
+  objs.forEach(o => { if (!o.isCropRect) fn(o); });
+  if (objs.length) { canvas.requestRenderAll(); pushUndo(); }
+}
+
+// SIZES SCALE WITH THE PHOTO. All the size steps below are defined for a
+// reference photo 1600 px across; sizeScale() stretches them to the photo
+// actually open, so a "medium" stroke, marker or text looks the same
+// RELATIVE size on a phone snapshot and on a 6000-px studio shot alike.
+// (Recipes store the final pixel values, so old drawings are untouched.)
+function sizeScale() {
+  return imgW ? Math.min(6, Math.max(1, Math.max(imgW, imgH) / 1600)) : 1;
+}
+// each step ~1.6x the one before, so every jump in the menu is equally
+// visible - and the heaviest is genuinely heavy
+const WEIGHTS = [2, 3, 5, 8, 13, 21];
+const HL_WEIGHTS = [6, 9, 12, 18, 26, 36];         // the highlighter needs beef (band = x3)
+const FONT_SIZES = [10, 13, 16, 24, 30, 36, 48, 72, 96, 144, 216, 288];   // image points
+const MSIZES = [24, 32, 44, 60, 80];               // marker badge diameters, image px
+const BLURS = [{px: 22, name: 'Coarse'}, {px: 14, name: 'Medium'}, {px: 8, name: 'Fine'},
+               {px: 12, name: 'Soft blur', smooth: true},
+               {px: 24, name: 'Soft strong', smooth: true}];
+let strokeWeight = 5, opacChoice = 100;
+let fontSizePt = 24, textStyle = 'standard', textOpacity = 100;
+// the marker's own memory - like the highlighter's. Dropping several
+// numbered markers in a row keeps the size, color and opacity you chose.
+let markerSize = 44, markerColor = '#e02020', markerOpacity = 100;
+let blurBlockPx = 14, blurSmoothOn = false;
+let headsChoice = 1;                               // the arrow tool's head style
+let hlColor = '#ffd400', hlOpacity = 50, hlWeight = 36;   // the highlighter's own memory
+let exporting = false;                             // true while the flat JPEG is rendered
+function strokeW() { return Math.max(1, Math.round(strokeWeight * sizeScale())); }
+function opac() { return opacChoice / 100; }
+function hexToRgba(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return 'rgba(' + (n >> 16 & 255) + ',' + (n >> 8 & 255) + ',' + (n & 255) + ',' + a + ')';
+}
+function dashFor(w) { return [w * 2.5, w * 1.6]; }
+function pillColorFor(textColor) {
+  return textColor === '#ffffff' ? 'rgba(17,17,17,0.75)' : 'rgba(255,255,255,0.85)';
+}
+// The pen and the highlighter share the freehand brush - the highlighter is
+// simply much wider and see-through.
+function configureBrush() {
+  if (!canvas) return;
+  if (tool === 'hl') {
+    canvas.freeDrawingBrush.color = hexToRgba(hlColor, hlOpacity / 100 * 0.8);
+    canvas.freeDrawingBrush.width = Math.round(hlWeight * 3 * sizeScale());
+  } else {
+    canvas.freeDrawingBrush.color = color;
+    canvas.freeDrawingBrush.width = strokeW();
+  }
+}
+
+// ---- fill and opacity ---------------------------------------------------------
+let fillOn = false;
+const NO_FILL = 'rgba(0,0,0,0)';
+function isFilled(o) {
+  return (o.type === 'rect' || o.type === 'ellipse') && o.fill && o.fill !== NO_FILL;
+}
+$('btnFill').onclick = () => {
+  fillOn = !fillOn;
+  $('btnFill').classList.toggle('active', fillOn);
+  applyToSelection(o => {
+    if (o.type === 'rect' || o.type === 'ellipse') o.set('fill', fillOn ? color : NO_FILL);
+  });
+};
+function renderWeightMenu() {
+  const menu = $('weightMenu');
+  menu.innerHTML = '';
+  const hl = tool === 'hl';
+  const list = hl ? HL_WEIGHTS : WEIGHTS;
+  const cur = hl ? hlWeight : strokeWeight;
+  const disp = w => hl ? Math.min(12, Math.max(2, Math.round(w * 0.32)))
+                       : Math.min(14, Math.max(1, Math.round(w * 0.7)));
+  for (const w of list) {
+    const row = document.createElement('span');
+    row.className = 'ddRow' + (w === cur ? ' sel' : '');
+    const line = document.createElement('span');
+    line.className = 'wline';
+    line.style.width = '70px';
+    line.style.height = disp(w) + 'px';
+    row.appendChild(line);
+    const check = document.createElement('span');
+    check.className = 'check';
+    check.textContent = '✓';
+    row.appendChild(check);
+    row.onclick = () => {
+      if (tool === 'hl') hlWeight = w; else strokeWeight = w;
+      renderWeightMenu();
+      updateWeightTrigger();
+      const ws = Math.max(1, Math.round(w * (tool === 'hl' ? 3 : 1) * sizeScale()));
+      applyToSelection(o => {
+        if (o.stroke && !o.isMarker) {
+          o.set('strokeWidth', ws);
+          if (o.strokeDashArray) o.set('strokeDashArray', dashFor(ws));
+          if (o.isArrow) rebuildArrow(o);   // heads grow with the stroke
+        }
+      });
+      configureBrush();
+      closeDropdowns();
+    };
+    menu.appendChild(row);
+  }
+}
+function updateWeightTrigger() {
+  const hl = tool === 'hl';
+  const cur = hl ? hlWeight : strokeWeight;
+  $('weightPrev').style.height =
+    Math.min(10, Math.max(2, Math.round(cur * (hl ? 0.25 : 0.5)))) + 'px';
+}
+renderWeightMenu();
+// ---- text styles --------------------------------------------------------------
+// Seven looks for text; the Outlined and Box styles keep text readable on
+// busy photos. A text remembers its style (textStyle) so recoloring and
+// resizing keep the look intact.
+const FONT_STD = "-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif";
+const FONT_ROUND = "ui-rounded, 'SF Pro Rounded', 'Arial Rounded MT Bold', 'Comic Sans MS', sans-serif";
+const FONT_MONO = "ui-monospace, Menlo, Consolas, monospace";
+const TEXT_STYLES = [
+  {id: 'standard',   name: 'Standard'},
+  {id: 'rounded',    name: 'Rounded'},
+  {id: 'outlined',   name: 'Outlined'},
+  {id: 'mono',       name: 'Mono'},
+  {id: 'box',        name: 'Box'},
+  {id: 'monobox',    name: 'Mono Box'},
+  {id: 'roundedbox', name: 'Rounded Box'},
+];
+function textStyleProps(style, c, size) {
+  const plain = {stroke: '', strokeWidth: 0, paintFirst: 'fill', textBackgroundColor: ''};
+  switch (style) {
+    case 'rounded':    return {...plain, fontFamily: FONT_ROUND, fontWeight: 700, fill: c};
+    // colored letter with a white halo behind it - the halo grows with the size
+    case 'outlined':   return {fontFamily: FONT_STD, fontWeight: 700, fill: c,
+                               stroke: '#ffffff',
+                               strokeWidth: Math.max(2, Math.round(size / 6)),
+                               paintFirst: 'stroke', strokeLineJoin: 'round',
+                               textBackgroundColor: ''};
+    case 'mono':       return {...plain, fontFamily: FONT_MONO, fontWeight: 600, fill: c};
+    case 'box':        return {...plain, fontFamily: FONT_STD, fontWeight: 600, fill: c};
+    case 'monobox':    return {...plain, fontFamily: FONT_MONO, fontWeight: 600, fill: c};
+    case 'roundedbox': return {...plain, fontFamily: FONT_ROUND, fontWeight: 700, fill: c};
+    default:           return {...plain, fontFamily: FONT_STD, fontWeight: 600, fill: c};
+  }
+}
+// The three container styles draw a REAL padded rounded rectangle behind the
+// text (the library's own text-background is a tight unpadded square). The
+// padding and radius scale with the font size, so the pill holds its shape
+// from 10 pt to 288 pt.
+function isBoxedStyle(s) { return s === 'box' || s === 'monobox' || s === 'roundedbox'; }
+function paddedBoxBackground(ctx) {
+  const s = this.textStyle;
+  const padH = Math.round(this.fontSize * 0.45);
+  const padV = Math.round(this.fontSize * 0.26);
+  const w = this.width + padH * 2, h = this.height + padV * 2;
+  const r = Math.min(h / 2, s === 'roundedbox' ? h / 2 : Math.round(this.fontSize * 0.12));
+  const x = -w / 2, y = -h / 2;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+  ctx.fillStyle = s === 'roundedbox' ? hexToRgba(this.fill, 0.14) : '#ffffff';
+  ctx.fill();
+  if (s !== 'roundedbox') {
+    ctx.strokeStyle = 'rgba(0,0,0,0.10)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+function applyStyleToText(o, style, c) {
+  o.set(textStyleProps(style, c, o.fontSize));
+  o.textStyle = style;
+  const boxed = isBoxedStyle(style);
+  o._renderBackground = boxed ? paddedBoxBackground
+                              : fabric.Object.prototype._renderBackground;
+  o.objectCaching = !boxed;     // the pad draws outside the cached box
+  o.padding = boxed ? Math.round(o.fontSize * 0.26) : 0;
+  o.dirty = true;
+}
+// which color is a styled text "in"? (texts saved by the OLD outlined recipe
+// still carry it in the stroke - white fill gives them away)
+function texColor(o) {
+  if (o.textStyle === 'outlined' && o.stroke && o.stroke !== '#ffffff' &&
+      (o.fill === '#ffffff' || o.fill === '#fff')) return o.stroke;
+  return o.fill || color;
+}
+
+function stylePreviewCss(el, style, c, fontPx) {
+  const pr = textStyleProps(style, c, fontPx);
+  el.style.fontFamily = pr.fontFamily;
+  el.style.fontWeight = pr.fontWeight;
+  el.style.color = pr.fill;
+  el.style.textShadow = style === 'outlined'
+    ? '0 0 1.5px #fff, 0 0 1.5px #fff, 0 0 3px #fff' : '';
+  el.style.background = (style === 'box' || style === 'monobox') ? '#ffffff'
+    : style === 'roundedbox' ? hexToRgba(c, 0.14) : '';
+  el.style.border = (style === 'box' || style === 'monobox')
+    ? '1px solid rgba(0,0,0,.10)' : '0';
+  el.style.borderRadius = style === 'roundedbox' ? '999px'
+    : (style === 'box' || style === 'monobox') ? '3px' : '0';
+  el.style.padding = isBoxedStyle(style) ? '1px 7px' : '0';
+}
+function updateStyleTrigger() { stylePreviewCss($('fstylePrev'), textStyle, color, 16); }
+function refreshStyleMenu() {
+  document.querySelectorAll('#fstyleMenu .ddRow').forEach(row => {
+    stylePreviewCss(row.querySelector('.stylePrev'), row.dataset.style, color, 14);
+    row.classList.toggle('sel', row.dataset.style === textStyle);
+  });
+}
+(function buildTextMenus() {
+  const fsMenu = $('fsMenu');
+  for (const s of FONT_SIZES) {
+    const row = document.createElement('span');
+    row.className = 'ddRow' + (s === fontSizePt ? ' sel' : '');
+    row.innerHTML = '<span style="width:44px">' + s + ' pt</span><span class="check">✓</span>';
+    row.onclick = () => {
+      fontSizePt = s;
+      $('fsLabel').textContent = s + ' pt';
+      fsMenu.querySelectorAll('.ddRow').forEach(x => x.classList.toggle('sel', x === row));
+      applyToSelection(o => {
+        if (o.type === 'i-text') {
+          o.set('fontSize', Math.round(s * sizeScale()));
+          if (o.textStyle) applyStyleToText(o, o.textStyle, texColor(o));
+        }
+      });
+      closeDropdowns();
+    };
+    fsMenu.appendChild(row);
+  }
+  const stMenu = $('fstyleMenu');
+  for (const st of TEXT_STYLES) {
+    const row = document.createElement('span');
+    row.className = 'ddRow' + (st.id === textStyle ? ' sel' : '');
+    row.dataset.style = st.id;
+    row.innerHTML = '<span class="stylePrev" style="font-size:14px">Text</span>' +
+                    '<span style="color:var(--muted)">' + st.name + '</span>' +
+                    '<span class="check">✓</span>';
+    row.onclick = () => {
+      textStyle = st.id;
+      updateStyleTrigger();
+      refreshStyleMenu();
+      applyToSelection(o => { if (o.type === 'i-text') applyStyleToText(o, st.id, texColor(o)); });
+      closeDropdowns();
+    };
+    stMenu.appendChild(row);
+  }
+  updateStyleTrigger();
+})();
+
+// ---- marker size ---------------------------------------------------------------
+(function buildMsizeMenu() {
+  const menu = $('msizeMenu');
+  for (const s of MSIZES) {
+    const row = document.createElement('span');
+    row.className = 'ddRow' + (s === markerSize ? ' sel' : '');
+    const d = Math.min(20, Math.round(s / 4) + 4);      // preview circle, screen px
+    const f = Math.max(6, Math.round(d * 0.55));
+    row.innerHTML = '<span class="mwrap"><span class="mprev" style="width:' + d +
+                    'px;height:' + d + 'px;font-size:' + f + 'px">1</span></span>' +
+                    '<span class="check">✓</span>';
+    row.onclick = () => {
+      markerSize = s;
+      $('msizePrev').style.width = d + 'px';
+      $('msizePrev').style.height = d + 'px';
+      $('msizePrev').style.fontSize = f + 'px';
+      menu.querySelectorAll('.ddRow').forEach(x => x.classList.toggle('sel', x === row));
+      applyToSelection(o => {
+        if (o.isMarker) o.set({scaleX: s * sizeScale() / o.width,
+                               scaleY: s * sizeScale() / o.height});
+      });
+      closeDropdowns();
+    };
+    menu.appendChild(row);
+  }
+})();
+
+// ---- blur strength -------------------------------------------------------------
+function syncBlurMenu() {
+  document.querySelectorAll('#blurMenu .ddRow').forEach((x, i) =>
+    x.classList.toggle('sel',
+      BLURS[i].px === blurBlockPx && !!BLURS[i].smooth === blurSmoothOn));
+}
+(function buildBlurMenu() {
+  const menu = $('blurMenu');
+  BLURS.forEach((lvl, i) => {
+    const row = document.createElement('span');
+    row.className = 'ddRow';
+    let icon;
+    if (lvl.smooth) {   // a soft dot for the true-blur styles
+      icon = '<svg width="22" height="14" style="flex:0 0 auto"><defs><filter id="bfz' + i +
+             '" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="' +
+             (lvl.px > 16 ? 2.6 : 1.6) + '"/></filter></defs><circle cx="11" cy="7" r="4.5"' +
+             ' fill="currentColor" filter="url(#bfz' + i + ')"/></svg>';
+    } else {            // the little mosaic for the pixelating styles
+      const cell = Math.max(2, Math.round(lvl.px / 4));
+      icon = '<svg width="22" height="14" style="flex:0 0 auto">';
+      for (let x = 0; x < 22; x += cell)
+        for (let y = 0; y < 14; y += cell)
+          icon += '<rect x="' + x + '" y="' + y + '" width="' + cell + '" height="' + cell +
+                  '" fill="currentColor" opacity="' + (((x + y) / cell) % 2 ? 0.25 : 0.6) + '"/>';
+      icon += '</svg>';
+    }
+    row.innerHTML = icon + '<span>' + lvl.name + '</span><span class="check">✓</span>';
+    row.onclick = () => {
+      blurBlockPx = lvl.px;
+      blurSmoothOn = !!lvl.smooth;
+      $('blurLabel').textContent = lvl.name;
+      syncBlurMenu();
+      applyToSelection(o => {
+        if (o.isBlurZone) {
+          o.blurPx = Math.round(lvl.px * sizeScale());
+          o.blurSmooth = !!lvl.smooth;
+        }
+      });
+      closeDropdowns();
+    };
+    menu.appendChild(row);
+  });
+  syncBlurMenu();
+})();
+
+// ---- arrow heads + curved -------------------------------------------------------
+function syncHeadButtons() {
+  document.querySelectorAll('#grpHeads .segBtn').forEach(b =>
+    b.classList.toggle('active', parseInt(b.dataset.heads, 10) === headsChoice));
+}
+document.querySelectorAll('#grpHeads .segBtn').forEach(b => {
+  b.onclick = () => {
+    headsChoice = parseInt(b.dataset.heads, 10);
+    syncHeadButtons();
+    applyToSelection(o => { if (o.isArrow) { o.arrowHeads = headsChoice; rebuildArrow(o); } });
+  };
+});
+
+(function buildOpacMenu() {
+  const menu = $('opacMenu');
+  for (const p of [25, 50, 75, 100]) {
+    const row = document.createElement('span');
+    row.className = 'ddRow' + (p === opacChoice ? ' sel' : '');
+    row.innerHTML = '<span>' + p + '%</span><span class="check">✓</span>';
+    row.onclick = () => {
+      if (tool === 'hl') hlOpacity = p;
+      else if (tool === 'marker') markerOpacity = p;
+      else if (tool === 'text') textOpacity = p;
+      else opacChoice = p;
+      if (canvas && canvas.getActiveObjects().some(o => o.isMarker))
+        markerOpacity = p;   // the next marker starts this see-through
+      $('opacLabel').textContent = p + '%';
+      menu.querySelectorAll('.ddRow').forEach(x => x.classList.toggle('sel', x === row));
+      applyToSelection(o => o.set('opacity', p / 100));
+      configureBrush();
+      closeDropdowns();
+    };
+    menu.appendChild(row);
+  }
+})();
+
+// ---- pasted pictures ("assets") ----------------------------------------------
+// A picture pasted into an annotation is uploaded to the hidden ANNOTATION
+// ASSETS field right away; the drawing only remembers its id. When the image
+// is reopened later, the id is turned back into a fresh download address.
+function assetUrl(attId) {
+  return '/api/image?' + new URLSearchParams({
+    baseId: CURRENT.baseId, tableId: CURRENT.tableId, recordId: editing.record.id,
+    imageField: BOOT.assetField, attId});
+}
+
+function rewriteAssetSrcs(json) {
+  (json.objects || []).forEach(function walk(o) {
+    if (o.assetAttId) o.src = location.origin + assetUrl(o.assetAttId);
+    (o.objects || []).forEach(walk);
+  });
+}
+
+// Shrink a picture so it uploads fast and stays under Airtable's 5 MB limit.
+function shrinkImage(file, maxDim) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const im = new Image();
+    im.onload = () => {
+      const f = Math.min(1, (maxDim || 1600) / Math.max(im.width, im.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(im.width * f); c.height = Math.round(im.height * f);
+      c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+      // PNG keeps transparent backgrounds; fall back to JPEG if that gets big
+      let out = (file.type === 'image/png') ? c.toDataURL('image/png')
+                                            : c.toDataURL('image/jpeg', 0.9);
+      if (out.length * 3 / 4 > 4 * 1024 * 1024) out = c.toDataURL('image/jpeg', 0.75);
+      URL.revokeObjectURL(url);
+      resolve(out);
+    };
+    im.onerror = () => reject(new Error('the browser cannot read that picture format'));
+    im.src = url;
+  });
+}
+
+async function addPictureFile(file) {
+  if (!editing || !canvas || !imgW) return;
+  say('Adding picture…', true);
+  try {
+    const dataUrl = await shrinkImage(file);
+    const up = await api('/api/upload_asset', {
+      baseId: CURRENT.baseId, tableId: CURRENT.tableId, recordId: editing.record.id,
+      imageDataUrl: dataUrl, filename: file.name || 'pasted picture.png'});
+    fabric.Image.fromURL(assetUrl(up.attId), img => {
+      // start at a friendly size, centered in the current view
+      const s = Math.min(1, (imgW * 0.45) / img.width, (imgH * 0.45) / img.height);
+      const centre = fabric.util.transformPoint(
+        {x: canvas.getWidth() / 2, y: canvas.getHeight() / 2},
+        fabric.util.invertTransform(canvas.viewportTransform));
+      img.set({assetAttId: up.attId, scaleX: s, scaleY: s,
+               left: centre.x - img.width * s / 2, top: centre.y - img.height * s / 2,
+               backgroundColor: ''});
+      img.setControlsVisibility({ml: false, mr: false, mt: false, mb: false});
+      canvas.add(img);
+      setTool('select');
+      canvas.setActiveObject(img);
+      canvas.requestRenderAll();
+      pushUndo();
+      say('Picture added - drag and resize it like any other drawing.');
+    });
+  } catch (e) { say('Could not add the picture: ' + e.message, true); }
+}
+
+$('btnImage').onclick = () => $('fileInput').click();
+$('fileInput').onchange = e => {
+  if (e.target.files[0]) addPictureFile(e.target.files[0]);
+  e.target.value = '';
+};
+
+document.addEventListener('paste', e => {
+  if (!editing || $('editor').style.display === 'none' || !e.clipboardData) return;
+  if (e.target && (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT')) return;
+  const active = canvas && canvas.getActiveObject();
+  if (active && active.isEditing) return;   // pasting text INTO a text box
+  const item = [...e.clipboardData.items].find(i => i.type.indexOf('image/') === 0);
+  if (item) { addPictureFile(item.getAsFile()); e.preventDefault(); }
+});
+
+// The record's images along the bottom of the editor. Each thumbnail carries
+// a printer mark: blue with a number = in the printout at that position,
+// gray = not printed (the image looks dimmed too). Click the mark to toggle.
+// Thumbnails can be DRAGGED into a new order (the printout follows), the +
+// tile adds a photo to the record, and clicking a thumbnail hops to it
+// (saving your current work first).
+function buildFilmstrip(record, img) {
+  const strip = $('filmstrip');
+  strip.innerHTML = '';
+  const bar = document.createElement('span');   // the drop-position indicator
+  bar.id = 'fsInsert';
+  strip.appendChild(bar);
+  const marked = record.images.filter(i => i.print);
+  for (const sib of record.images) {
+    const item = document.createElement('span');
+    item.className = 'fsItem' + (sib.print ? '' : ' noprint') +
+                     (sib.id === img.id ? ' current' : '');
+    const t = document.createElement('img');
+    t.src = sib.thumb;
+    t.title = sib.filename + (sib.annotated ? '  (annotated)' : '') +
+              (sib.print ? '  - prints as image ' + (marked.indexOf(sib) + 1)
+                         : '  - not in the printout');
+    if (sib.id === img.id) {
+      t.ondblclick = () => enterRename();   // the blue ring already marks it
+    } else {
+      t.onclick = async () => {
+        if (dirty) { const ok = await saveNow(); if (!ok) return; }
+        openEditor(record, sib);
+      };
+    }
+    // EVERY thumbnail can be dragged into a new order - including the one
+    // being edited (a drag is not a click, so nothing opens by accident)
+    t.title += '\nDrag to change the image order.';
+    t.draggable = true;
+    t.ondragstart = e => {
+      e.dataTransfer.setData('text/plain', sib.id);
+      e.dataTransfer.effectAllowed = 'move';
+      item.classList.add('dragging');
+    };
+    t.ondragend = () => { item.classList.remove('dragging'); hideInsertBar(); };
+    const b = document.createElement('button');
+    b.className = 'printBadge' + (sib.print ? ' on' : '');
+    b.textContent = sib.print ? String(marked.indexOf(sib) + 1) : '';
+    b.dataset.tip = sib.print
+      ? 'In printout as image ' + (marked.indexOf(sib) + 1) + ' — click to remove'
+      : 'Not in printout — click to add';
+    b.onclick = e => { e.stopPropagation(); togglePrint(record, sib); };
+    item.appendChild(t);
+    item.appendChild(b);
+    strip.appendChild(item);
+  }
+  const add = document.createElement('button');
+  add.className = 'fsAdd';
+  add.textContent = '+';
+  add.title = 'Add a photo to this record';
+  add.onclick = () => $('photoInput').click();
+  strip.appendChild(add);
+  wireStripDnd(strip, record, img);
+}
+
+// Reordering: the strip itself is the drop target, and a 3px accent bar in
+// the nearest gap is the single source of truth for where the drop lands.
+function fsItems(strip) { return [...strip.querySelectorAll('.fsItem')]; }
+function insertionIndexAt(strip, clientX) {
+  const items = fsItems(strip);
+  for (let i = 0; i < items.length; i++) {
+    const r = items[i].getBoundingClientRect();
+    if (clientX < r.left + r.width / 2) return i;
+  }
+  return items.length;
+}
+function showInsertBar(strip, idx) {
+  const bar = strip.querySelector('#fsInsert');
+  const items = fsItems(strip);
+  if (!bar || !items.length) return;
+  const sr = strip.getBoundingClientRect();
+  let x;
+  if (idx >= items.length) {
+    x = items[items.length - 1].getBoundingClientRect().right - sr.left +
+        strip.scrollLeft + 2.5;
+  } else {
+    x = items[idx].getBoundingClientRect().left - sr.left + strip.scrollLeft - 5.5;
+  }
+  bar.style.left = Math.max(0, x) + 'px';
+  bar.style.display = 'block';
+}
+function hideInsertBar() {
+  const bar = document.getElementById('fsInsert');
+  if (bar) bar.style.display = 'none';
+}
+function wireStripDnd(strip, record, img) {
+  // the WHOLE status bar accepts the drop, not just the narrow strip - that
+  // makes "before the first image" an easy target instead of a 4px sliver
+  const bar = $('statusBar');
+  bar.ondragover = e => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    showInsertBar(strip, insertionIndexAt(strip, e.clientX));
+  };
+  bar.ondragleave = e => {
+    if (!bar.contains(e.relatedTarget)) hideInsertBar();
+  };
+  bar.ondrop = e => {
+    e.preventDefault();
+    const idx = insertionIndexAt(strip, e.clientX);
+    hideInsertBar();
+    const movedId = e.dataTransfer.getData('text/plain');
+    if (movedId) moveImageToIndex(record, movedId, idx, img);
+  };
+}
+
+async function togglePrint(record, sib) {
+  const to = !sib.print;
+  say(to ? 'Putting it into the printout…' : 'Taking it out of the printout…', true);
+  try {
+    await api('/api/set_print', {baseId: CURRENT.baseId, tableId: CURRENT.tableId,
+      recordId: record.id, imageField: CURRENT.imageField, attId: sib.id, print: to});
+    sib.print = to;
+    buildFilmstrip(record, editing.img);
+    const n = record.images.filter(i => i.print).length;
+    say(to ? 'In the printout ✓ (' + n + ' image' + (n === 1 ? '' : 's') + ' print now)'
+           : 'Out of the printout ✓ - its drawings are kept and it can come back any time');
+  } catch (e) { say('Could not change it: ' + e.message, true); }
+}
+
+// ---- inline rename of the current image ---------------------------------------
+// The filename in the status bar is editable in place: hover shows a pencil,
+// the extension stays locked, Enter/blur save, Esc cancels. When the image
+// field cannot be written at all (synced tables, lookups), the affordance
+// never appears - checkRenameable() asks the server once per record.
+let renameAllowed = false, renameBusy = false;
+function splitFilename(fn) {
+  const m = /(\.[A-Za-z0-9]+)$/.exec(fn || '');
+  return m ? [fn.slice(0, m.index), m[1]] : [fn || '', ''];
+}
+function showFilename() {
+  if (!editing) return;
+  const parts = splitFilename(editing.img.filename);
+  $('nameRecord').textContent = editing.record.name;
+  $('fnameStem').textContent = parts[0];
+  $('fnameExt').textContent = parts[1];
+  $('fnameZone').style.display = '';
+  $('fnameEdit').classList.remove('on', 'saving', 'invalid');
+  $('fnameHint').textContent = '';
+  $('fnameZone').classList.toggle('canRename', renameAllowed);
+}
+async function checkRenameable(record) {
+  renameAllowed = false;
+  $('fnameZone').classList.remove('canRename');
+  try {
+    const res = await api('/api/can_rename', {baseId: CURRENT.baseId,
+      tableId: CURRENT.tableId, recordId: record.id, imageField: CURRENT.imageField});
+    renameAllowed = !!res.canRename;
+  } catch (e) { /* stay read-only when in doubt */ }
+  if (editing && editing.record.id === record.id)
+    $('fnameZone').classList.toggle('canRename', renameAllowed);
+}
+function enterRename() {
+  if (!renameAllowed || renameBusy || !editing) return;
+  const parts = splitFilename(editing.img.filename);
+  $('fnameZone').style.display = 'none';
+  const ed = $('fnameEdit');
+  ed.classList.add('on');
+  ed.classList.remove('invalid', 'saving');
+  $('fnameHint').textContent = '';
+  $('fnameExtLock').textContent = parts[1];
+  const inp = $('fnameInput');
+  inp.value = parts[0];
+  inp.disabled = false;
+  inp.focus();
+  inp.select();                         // typing replaces the whole stem
+}
+function cancelRename() {
+  if (renameBusy) return;
+  showFilename();
+}
+async function commitRename() {
+  if (renameBusy || !editing || !$('fnameEdit').classList.contains('on')) return;
+  const inp = $('fnameInput');
+  const oldStem = splitFilename(editing.img.filename)[0];
+  const stem = inp.value.replace(/[\\/:*?"<>|]/g, '').trim();
+  if (!stem) {
+    $('fnameEdit').classList.add('invalid');
+    $('fnameHint').textContent = "Name can't be empty";
+    return;
+  }
+  if (stem === oldStem) { showFilename(); return; }
+  renameBusy = true;
+  $('fnameEdit').classList.remove('invalid');
+  $('fnameEdit').classList.add('saving');
+  $('fnameHint').textContent = '';
+  try {
+    const res = await api('/api/rename_image', {baseId: CURRENT.baseId,
+      tableId: CURRENT.tableId, recordId: editing.record.id,
+      imageField: CURRENT.imageField, attId: editing.img.id, newStem: stem});
+    // the rename gives the image a NEW id in Airtable - follow it everywhere
+    editing.img.id = res.attId;
+    editing.img.filename = res.filename;
+    renameBusy = false;
+    showFilename();
+    buildFilmstrip(editing.record, editing.img);
+    say('Renamed ✓');
+  } catch (e) {
+    renameBusy = false;
+    $('fnameEdit').classList.remove('saving');
+    $('fnameEdit').classList.add('invalid');
+    $('fnameHint').textContent = "Couldn't rename — try again";
+  }
+}
+$('fnamePencil').onclick = enterRename;
+$('fnameStem').onclick = enterRename;
+$('fnameInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); commitRename(); }
+  else if (e.key === 'Escape') { e.preventDefault(); cancelRename(); }
+  e.stopPropagation();
+});
+$('fnameOk').onmousedown = e => { e.preventDefault(); commitRename(); };
+$('fnameNo').onmousedown = e => { e.preventDefault(); cancelRename(); };
+$('fnameInput').addEventListener('blur', () => {
+  if (!renameBusy && $('fnameEdit').classList.contains('on')) commitRename();
+});
+
+function readAsDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(new Error('could not read the file'));
+    r.readAsDataURL(file);
+  });
+}
+
+async function addPhotoFile(file) {
+  if (!editing) return;
+  say('Adding the photo to the record…', true);
+  try {
+    // keep the original quality when it fits under Airtable's upload limit
+    const dataUrl = file.size <= 4.4 * 1024 * 1024
+      ? await readAsDataURL(file)
+      : await shrinkImage(file, 3000);
+    await api('/api/add_photo', {baseId: CURRENT.baseId, tableId: CURRENT.tableId,
+      recordId: editing.record.id, imageField: CURRENT.imageField,
+      imageDataUrl: dataUrl, filename: file.name || 'photo.jpg'});
+    const fresh = await api('/api/record?' + new URLSearchParams({
+      baseId: CURRENT.baseId, tableId: CURRENT.tableId, recordId: editing.record.id,
+      imageField: CURRENT.imageField, nameField: CURRENT.nameField,
+      notesField: CURRENT.instructionsField || ''}));
+    editing.record.images = fresh.images;
+    buildFilmstrip(editing.record, editing.img);
+    say('Photo added ✓ - click its printer mark if it should be in the printout.');
+  } catch (e) { say('Could not add the photo: ' + e.message, true); }
+}
+$('photoInput').onchange = e => {
+  if (e.target.files[0]) addPhotoFile(e.target.files[0]);
+  e.target.value = '';
+};
+
+async function moveImageToIndex(record, movedId, idx, currentImg) {
+  const imgs = record.images;
+  const from = imgs.findIndex(i => i.id === movedId);
+  if (from < 0) return;
+  let to = idx;
+  if (from < to) to--;                 // removing it first shifts the gap left
+  to = Math.max(0, Math.min(imgs.length - 1, to));
+  if (to === from) return;
+  const [moved] = imgs.splice(from, 1);
+  imgs.splice(to, 0, moved);
+  buildFilmstrip(record, currentImg);
+  say('Saving the new image order…', true);
+  try {
+    await api('/api/reorder_images', {baseId: CURRENT.baseId, tableId: CURRENT.tableId,
+      recordId: record.id, imageField: CURRENT.imageField, order: imgs.map(i => i.id)});
+    say('Image order saved to Airtable ✓ - the first image is now the cover.');
+  } catch (e) { say('Could not save the order: ' + e.message, true); }
+}
+
+// ---- crash-proof drafts -------------------------------------------------------
+// While you draw, a copy of the unsaved work is parked in the browser's own
+// storage every half minute. It is thrown away on every successful save, so a
+// leftover draft can only mean a session that ended badly (crash, force-quit,
+// battery died). Opening that image again then offers to restore the work.
+const DRAFT_PREFIX = 'annotDraft:';
+function draftKeyFor(recordId, attId) { return DRAFT_PREFIX + recordId + ':' + attId; }
+function loadDraft(recordId, attId) {
+  try { return JSON.parse(localStorage.getItem(draftKeyFor(recordId, attId)) || 'null'); }
+  catch (e) { return null; }
+}
+function removeDraft(recordId, attId) {
+  try { localStorage.removeItem(draftKeyFor(recordId, attId)); } catch (e) {}
+}
+function storeDraft() {
+  if (!editing || !canvas || !dirty || !imgW || saving) return;
+  try {
+    const recipe = JSON.parse(snapshot());
+    (recipe.objects || []).forEach(function walk(o) {   // same as when saving:
+      if (o.assetAttId) o.src = '';                     // pasted pictures keep only their id
+      (o.objects || []).forEach(walk);
+    });
+    localStorage.setItem(draftKeyFor(editing.record.id, editing.img.id), JSON.stringify({
+      when: Date.now(), fabric: recipe,
+      notes: CURRENT.instructionsField ? $('notesText').value : null}));
+  } catch (e) { /* storage full or blocked - drafts are best-effort */ }
+}
+function pruneOldDrafts() {
+  try {
+    const cutoff = Date.now() - 14 * 24 * 3600 * 1000;   // two weeks
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (!k || !k.startsWith(DRAFT_PREFIX)) continue;
+      let d = null;
+      try { d = JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) {}
+      if (!d || !d.when || d.when < cutoff) localStorage.removeItem(k);
+    }
+  } catch (e) {}
+}
+setInterval(storeDraft, 30000);
+document.addEventListener('visibilitychange', () => { if (document.hidden) storeDraft(); });
+window.addEventListener('beforeunload', storeDraft);
+pruneOldDrafts();
+
+// Two tabs on the SAME image would silently overwrite each other's saves
+// (the last one to save wins). That can't be prevented - Airtable has no
+// locks - but it CAN be called out the moment it happens.
+const tabChannel = ('BroadcastChannel' in window) ? new BroadcastChannel('annotator-tabs') : null;
+if (tabChannel) tabChannel.onmessage = e => {
+  const m = e.data || {};
+  const myKey = editing ? editing.record.id + ':' + editing.img.id : null;
+  if (!myKey || m.key !== myKey) return;
+  if (m.type === 'opened') tabChannel.postMessage({type: 'busy', key: m.key});
+  say('Heads up: this image is open in ANOTHER tab too. Whichever tab saves last wins - ' +
+      'best close one of them.', true);
+};
+
+// Warn about a token that cannot write when the editor OPENS - not after ten
+// minutes of drawing. The test is a harmless "change nothing" save.
+const writeChecked = {};
+async function warnIfReadOnly(record) {
+  if (writeChecked[record.id]) return;
+  writeChecked[record.id] = true;
+  try {
+    const res = await api('/api/check_write', {baseId: CURRENT.baseId,
+      tableId: CURRENT.tableId, recordId: record.id});
+    if (!res.canWrite)
+      say('Heads up before you start drawing: saving will FAIL. ' + res.problem, true);
+  } catch (e) { /* the check itself failing is not worth a warning */ }
+}
+
+// ---- opening an image -------------------------------------------------------
+// Big photos can take seconds to arrive. If the user has already clicked on to
+// another image by the time an old one finishes loading, the old load must be
+// thrown away - otherwise its drawings would land on the wrong picture.
+let openSeq = 0;
+
+async function openEditor(record, img) {
+  const seq = ++openSeq;
+  editing = {record, img};
+  noteRecent(record);   // it goes to the top of the rail's Recent list
+  if (tabChannel) tabChannel.postMessage({type: 'opened', key: record.id + ':' + img.id});
+  $('home').style.display = 'none';
+  $('editor').style.display = 'flex';
+  showFilename();
+  checkRenameable(record);
+  // came from an Airtable button? then leaving should hand control back
+  $('btnBack').textContent = DEEP ? '‹ Save & close' : '‹ Save & back';
+  buildFilmstrip(record, img);
+  $('loadingBig').style.display = 'flex';
+  // the instructions panel, if an instructions field was chosen
+  $('notesPanel').classList.toggle('on', !!CURRENT.instructionsField);
+  $('notesTitle').textContent = fieldName(CURRENT.instructionsField) || 'Comments';
+  $('notesText').value = '';
+  dirty = false;
+  // wipe the PREVIOUS image's leftovers right away - if this open fails
+  // halfway, nothing (rotate, save) may act on the old picture's state
+  origBitmap = null;
+  imgW = imgH = 0;
+  imgRotation = 0;
+  hlOpacity = 50;    // the highlighter always starts half-see-through
+  let restoredDraft = false;
+  warnIfReadOnly(record);
+
+  if (canvas) { canvas.dispose(); canvas = null; }
+  canvas = new fabric.Canvas('cv', {preserveObjectStacking: true, selection: true,
+                                    // corners drag freely; holding SHIFT keeps the shape
+                                    uniformScaling: false, uniScaleKey: 'shiftKey'});
+  sizeCanvasToWindow();
+  installCanvasBehaviour();
+  setTool('select');   // fresh image, fresh start - and controls hide until needed
+
+  try {
+    // 1. saved drawing recipe (if any)   2. the original picture, fresh
+    const annP = api('/api/annotations?' + new URLSearchParams({
+      baseId: CURRENT.baseId, tableId: CURRENT.tableId, recordId: record.id,
+      textField: CURRENT.instructionsField || '',
+      imageField: CURRENT.imageField}));
+    const imgUrl = '/api/image?' + new URLSearchParams({
+      baseId: CURRENT.baseId, tableId: CURRENT.tableId, recordId: record.id,
+      imageField: CURRENT.imageField, attId: img.id});
+    const resp = await fetch(imgUrl);
+    if (!resp.ok) {   // the server sends proper JSON when something went wrong
+      const t = await resp.json().catch(() => ({}));
+      throw new Error(t.error || ('problem ' + resp.status));
+    }
+    const objUrl = URL.createObjectURL(await resp.blob());
+    const annResp = await annP;
+    if (seq !== openSeq) return;          // user already moved on - stand down
+    // the server may have healed/updated the print flags - refresh the strip
+    for (const im of record.images) {
+      const e = annResp.annotations[im.id];
+      im.annotated = !!(e && (e.recipeAttId || e.fabric || e.annotatedAttId));
+      im.print = !!(e && e.print);
+    }
+    buildFilmstrip(record, img);
+    let ann = annResp.annotations[img.id];
+    if (ann && !ann.fabric && ann.recipeAttId) {
+      // newer save format: the drawing recipe is a small .json file in the
+      // hidden assets field - fetch it fresh
+      const rr = await fetch('/api/image?' + new URLSearchParams({
+        baseId: CURRENT.baseId, tableId: CURRENT.tableId, recordId: record.id,
+        imageField: BOOT.assetField, attId: ann.recipeAttId}));
+      if (seq !== openSeq) return;
+      if (!rr.ok) {
+        // the drawings EXIST but could not be fetched. Quietly opening a
+        // blank canvas here would invite a save that wipes them - abort.
+        const t = await rr.json().catch(() => ({}));
+        throw new Error('this image HAS saved drawings, but they could not be loaded (' +
+          (t.error || ('problem ' + rr.status)) + '). Nothing was changed.');
+      }
+      ann = {...ann, fabric: await rr.json().catch(() => null)};
+      if (seq !== openSeq) return;
+      if (!ann.fabric) {
+        // the file arrived but is unreadable - only proceed if the user
+        // KNOWS a save from here replaces the stored drawings
+        if (!confirm('The saved drawings for this image could not be read.\n\n' +
+              'OK opens the picture BLANK - saving would then overwrite the stored ' +
+              'drawings for good.\nCancel goes back without touching anything.'))
+          throw new Error('the saved drawings could not be read. Nothing was changed.');
+        ann = null;
+      }
+    }
+    if (CURRENT.instructionsField) $('notesText').value = annResp.text || '';
+
+    // A draft in the browser's storage means an earlier session ended without
+    // saving (crash, force-quit). Offer to pick up where it left off.
+    const draft = loadDraft(record.id, img.id);
+    if (draft && draft.fabric) {
+      const when = new Date(draft.when).toLocaleString();
+      if (confirm('This image has UNSAVED work from an earlier session (' + when + ') - ' +
+                  'probably a crash or a closed window.\n\n' +
+                  'OK restores that work. Cancel throws it away and opens the last saved state.')) {
+        ann = {...(ann || {}), fabric: draft.fabric};
+        if (typeof draft.notes === 'string' && CURRENT.instructionsField)
+          $('notesText').value = draft.notes;
+        restoredDraft = true;
+      } else {
+        removeDraft(record.id, img.id);
+      }
+    }
+
+    const el = new Image();
+    el.onerror = () => {
+      if (seq !== openSeq) return;
+      $('loadingBig').style.display = 'none';
+      say('This picture is in a format the browser cannot show (often TIFF or HEIC). ' +
+          'On Windows, iPhone HEIC photos need a one-time helper: open a terminal, run ' +
+          '"pip install pillow pillow-heif", then restart the app. Otherwise convert ' +
+          'the file to JPG or PNG and re-upload it to Airtable.', true);
+    };
+    el.onload = () => {
+      if (seq !== openSeq) return;        // a newer image is already open
+      origBitmap = el;
+      // a saved rotation is part of the drawing recipe
+      imgRotation = (ann && ann.fabric && ann.fabric.__rotation) || 0;
+      const finish = () => buildBackground(() => {
+        if (seq !== openSeq) return;
+        styleCropRect();
+        fixupObjects();
+        fitToWindow();
+        configureBrush();   // sizes scale with the picture via the S/M/L presets
+        undoStack = [snapshot()];
+        redoStack = [];
+        updateUndoButtons();
+        $('loadingBig').style.display = 'none';
+        if (restoredDraft) {
+          dirty = true;    // restored work counts as unsaved until it is saved
+          say('Restored the unsaved work ✓ - it goes to Airtable when you leave (or press Cmd/Ctrl+S).');
+        }
+      });
+      if (ann && ann.fabric) {
+        rewriteAssetSrcs(ann.fabric);   // pasted pictures: id -> fresh address
+        restoring = true;
+        canvas.loadFromJSON(ann.fabric, () => { restoring = false; if (seq === openSeq) finish(); });
+      } else finish();
+    };
+    el.src = objUrl;
+  } catch (e) {
+    if (seq !== openSeq) return;          // a newer open is running - stay out of its way
+    $('loadingBig').style.display = 'none';
+    // NEVER leave a half-open editor behind: it still carries the previous
+    // image's state, and saving from it would overwrite the stored drawings
+    // with an empty canvas. Back to the safety of the list.
+    editing = null;
+    dirty = false;
+    $('editor').style.display = 'none';
+    $('home').style.display = 'flex';
+    say('Could not open the image: ' + e.message, true);
+  }
+}
+
+// Show the photo, turned by the current rotation. The rotation is baked into
+// the pixels we display, so all drawing coordinates stay simple.
+function buildBackground(cb) {
+  let el = origBitmap;
+  if (imgRotation) {
+    const quarter = (imgRotation % 180) !== 0;
+    const rc = document.createElement('canvas');
+    rc.width = quarter ? origBitmap.height : origBitmap.width;
+    rc.height = quarter ? origBitmap.width : origBitmap.height;
+    const ctx = rc.getContext('2d');
+    ctx.translate(rc.width / 2, rc.height / 2);
+    ctx.rotate(imgRotation * Math.PI / 180);
+    ctx.drawImage(origBitmap, -origBitmap.width / 2, -origBitmap.height / 2);
+    el = rc;
+  }
+  bgEl = el;
+  bgImage = new fabric.Image(el, {left: 0, top: 0, originX: 'left', originY: 'top',
+                                  selectable: false});
+  imgW = bgImage.width; imgH = bgImage.height;
+  canvas.setBackgroundImage(bgImage, cb);
+}
+
+$('btnRotate').onclick = () => {
+  if (!origBitmap || !canvas) return;
+  const oldH = imgH;
+  imgRotation = (imgRotation + 90) % 360;
+  buildBackground(() => {
+    canvas.discardActiveObject();
+    // every drawing turns with the photo (markers stay upright - a tilted
+    // number would just look broken)
+    canvas.getObjects().forEach(o => {
+      const c = o.getCenterPoint();
+      if (!o.isMarker) o.angle = (o.angle + 90) % 360;
+      o.setPositionByOrigin(new fabric.Point(oldH - c.y, c.x), 'center', 'center');
+      o.setCoords();
+    });
+    fitToWindow();
+    canvas.requestRenderAll();
+    pushUndo();
+  });
+};
+
+function sizeCanvasToWindow() {
+  const wrap = $('canvasWrap');
+  canvas.setWidth(wrap.clientWidth);
+  canvas.setHeight(wrap.clientHeight);
+}
+window.addEventListener('resize', () => { if (canvas && editing) { sizeCanvasToWindow(); fitToWindow(); } });
+// If the toolbar ever changes height (controls appearing on a narrow window),
+// the canvas follows the new space quietly instead of jumping.
+new ResizeObserver(() => {
+  if (canvas && editing) { sizeCanvasToWindow(); canvas.requestRenderAll(); }
+}).observe(document.getElementById('canvasWrap'));
+
+function fitToWindow() {
+  if (!imgW) return;
+  const z = Math.min(canvas.getWidth() / imgW, canvas.getHeight() / imgH) * 0.96;
+  canvas.setViewportTransform([z, 0, 0, z,
+    (canvas.getWidth() - imgW * z) / 2, (canvas.getHeight() - imgH * z) / 2]);
+  canvas.requestRenderAll();
+}
+$('btnFit').onclick = fitToWindow;
+
+// ---- undo -------------------------------------------------------------------
+function snapshot() {
+  const j = canvas.toJSON(KEEP_PROPS);
+  delete j.backgroundImage;               // the picture itself is not part of the recipe
+  j.__rotation = imgRotation;             // ...but which way it is turned IS
+  return JSON.stringify(j);
+}
+// Undo and Redo gray out when they have nothing to do (they keep their
+// place at the bar's right edge, like in the design spec).
+function updateUndoButtons() {
+  $('btnUndo').disabled = undoStack.length < 2;
+  $('btnRedo').disabled = !redoStack.length;
+}
+function pushUndo() {
+  if (restoring || !canvas) return;
+  dirty = true;
+  redoStack.length = 0;       // a new action forks history - the old future is gone
+  undoStack.push(snapshot());
+  if (undoStack.length > 60) undoStack.shift();
+  updateUndoButtons();
+}
+function applySnapshot(str) {
+  const j = JSON.parse(str);
+  restoring = true;
+  const apply = () => canvas.loadFromJSON(j, () => {
+    canvas.setBackgroundImage(bgImage, () => {
+      styleCropRect(); fixupObjects(); restoring = false; canvas.requestRenderAll();
+    });
+  });
+  const rot = j.__rotation || 0;
+  if (rot !== imgRotation) { imgRotation = rot; buildBackground(apply); }
+  else apply();
+}
+function undo() {
+  if (undoStack.length < 2) return;
+  redoStack.push(undoStack.pop());
+  applySnapshot(undoStack[undoStack.length - 1]);
+  updateUndoButtons();
+}
+function redo() {
+  if (!redoStack.length) return;
+  const s = redoStack.pop();
+  undoStack.push(s);
+  applySnapshot(s);
+  updateUndoButtons();
+}
+$('btnUndo').onclick = undo;
+$('btnRedo').onclick = redo;
+
+// ---- tools -------------------------------------------------------------------
+document.querySelectorAll('.tool[data-tool]').forEach(btn => {
+  btn.onclick = () => setTool(btn.dataset.tool);
+});
+// Only show the controls that mean something for the current tool/selection -
+// e.g. the text-size slider is useless while drawing arrows, so it hides.
+function updateControls() {
+  let r;
+  if (tool === 'select') {
+    const objs = canvas ? canvas.getActiveObjects().filter(o => !o.isCropRect) : [];
+    const strokeable = o => o.type !== 'image' && o.type !== 'i-text' &&
+                            !o.isMarker && !o.isBlurZone && !o.isSpotlight;
+    const bImg = objs.find(o => o.type === 'image' && o.assetAttId);
+    const borderOn = !!(bImg && bImg.stroke);
+    r = {
+      border: !!bImg,
+      color: objs.some(o => o.type !== 'image' && !o.isBlurZone && !o.isSpotlight) || borderOn,
+      fill: objs.some(o => (o.type === 'rect' || o.type === 'ellipse') &&
+                           !o.isBlurZone && !o.isSpotlight),
+      stroke: objs.some(strokeable) || borderOn,
+      dash: objs.some(strokeable) || borderOn,
+      heads: objs.some(o => o.isArrow),
+      fsize: objs.some(o => o.type === 'i-text'),
+      fstyle: objs.some(o => o.type === 'i-text'),
+      msize: objs.some(o => o.isMarker),
+      blur: objs.some(o => o.isBlurZone),
+      opac: objs.some(o => !o.isBlurZone),
+      stack: objs.length > 0,
+    };
+    $('btnBorder').classList.toggle('active', borderOn);
+    // pasted pictures scale from the corners with their shape kept
+    if (canvas) canvas.uniformScaling =
+      objs.length === 1 && objs[0].type === 'image' && !!objs[0].assetAttId;
+    // a selected arrow shows ITS head style and bend in the controls
+    const arr = objs.find(o => o.isArrow);
+    if (arr) {
+      headsChoice = arr.arrowHeads || 0;
+      syncHeadButtons();
+    }
+  } else {
+    if (canvas) canvas.uniformScaling = false;
+    r = {
+      rect:    {color: 1, fill: 1, stroke: 1, dash: 1},
+      ellipse: {color: 1, fill: 1, stroke: 1, dash: 1},
+      arrow:   {color: 1, stroke: 1, heads: 1, dash: 1},
+      draw:    {color: 1, stroke: 1, dash: 1},
+      hl:      {color: 1, stroke: 1},
+      text:    {color: 1, fsize: 1, fstyle: 1},
+      marker:  {color: 1, msize: 1},
+      blur:    {blur: 1},
+      spot:    {opac: 1},
+      crop:    {aspect: 1},
+    }[tool] || {};
+    if (r.color) r.opac = 1;
+  }
+  // fade, don't remove: every control keeps its spot, the bar never jumps
+  const show = (id, on) => $(id).classList.toggle('off', !on);
+  show('ddColor', r.color);
+  show('ddWeight', r.stroke);
+  show('grpHeads', r.heads);
+  show('btnFill', r.fill);
+  show('ddFontSize', r.fsize);
+  show('ddFontStyle', r.fstyle);
+  show('ddMarkerSize', r.msize);
+  show('ddBlur', r.blur);
+  show('grpAspect', r.aspect);
+  show('btnCropApply', r.aspect);
+  show('btnCropCancel', r.aspect);
+  show('btnBorder', r.border);
+  show('btnDash', r.dash);
+  show('ddOpac', r.opac);
+  show('btnToFront', r.stack);
+  show('btnToBack', r.stack);
+  show('btnDelete', r.stack);
+  // dividers collapse too: one only renders between two non-empty zones
+  const toolZone = !!(r.color || r.stroke || r.heads || r.fill || r.fsize ||
+                      r.fstyle || r.msize || r.blur || r.border || r.dash || r.opac ||
+                      r.aspect);
+  show('ctxSep', !!r.stack && toolZone);
+  show('sepBeforeCtx', toolZone || !!r.stack);
+}
+
+$('btnDash').onclick = () => {
+  dashOn = !dashOn;
+  $('btnDash').classList.toggle('active', dashOn);
+  applyToSelection(o => {
+    if (o.stroke && !o.isMarker) o.set('strokeDashArray', dashOn ? dashFor(o.strokeWidth) : null);
+  });
+};
+// Border: a soft-on toggle that strokes an outline around a pasted picture.
+// While it is on, the Color / Weight / Dashed controls act on that outline.
+$('btnBorder').onclick = () => {
+  const objs = canvas ? canvas.getActiveObjects()
+    .filter(o => o.type === 'image' && o.assetAttId) : [];
+  if (!objs.length) return;
+  const turnOn = objs.some(o => !o.stroke);
+  objs.forEach(o => o.set(turnOn
+    ? {stroke: '#ffffff', strokeWidth: Math.max(2, Math.round(3 * sizeScale())),
+       strokeUniform: true, backgroundColor: ''}
+    : {stroke: '', strokeWidth: 0, strokeDashArray: null, backgroundColor: ''}));
+  canvas.requestRenderAll();
+  pushUndo();
+  updateControls();
+};
+
+function restack(direction) {
+  const objs = canvas.getActiveObjects().filter(o => !o.isCropRect);
+  if (!objs.length) return;
+  objs.forEach(o => direction === 'front' ? canvas.bringToFront(o) : canvas.sendToBack(o));
+  styleCropRect();                       // the crop area always stays at the bottom
+  canvas.requestRenderAll();
+  pushUndo();
+}
+$('btnToFront').onclick = () => restack('front');
+$('btnToBack').onclick = () => restack('back');
+
+// Every tool starts from its own defaults the moment you pick it - nothing
+// lingers from the previous drawing.
+function resetToolDefaults(t) {
+  if (t === 'rect' || t === 'ellipse') { opacChoice = 100; fillOn = false; dashOn = false; }
+  else if (t === 'arrow') { opacChoice = 100; dashOn = false; headsChoice = 0; }
+  else if (t === 'draw') { opacChoice = 100; dashOn = false; }
+  else if (t === 'hl') { hlOpacity = 50; hlColor = '#ffd400'; hlWeight = 36; }
+  else if (t === 'text') { textOpacity = 100; textStyle = 'standard'; }
+  else if (t === 'blur') { blurBlockPx = 14; blurSmoothOn = false; }
+  else if (t === 'spot') { opacChoice = 100; }
+  syncStateMenus();
+}
+// pull every trigger, toggle and menu checkmark back in line with the state
+function syncStateMenus() {
+  $('btnFill').classList.toggle('active', fillOn);
+  $('btnDash').classList.toggle('active', dashOn);
+  syncHeadButtons();
+  const d = Math.min(20, Math.round(markerSize / 4) + 4);
+  const f = Math.max(6, Math.round(d * 0.55));
+  const mp = $('msizePrev');
+  mp.style.width = d + 'px'; mp.style.height = d + 'px'; mp.style.fontSize = f + 'px';
+  document.querySelectorAll('#msizeMenu .ddRow').forEach((x, i) =>
+    x.classList.toggle('sel', MSIZES[i] === markerSize));
+  const bl = BLURS.find(b => b.px === blurBlockPx && !!b.smooth === blurSmoothOn);
+  $('blurLabel').textContent = bl ? bl.name : 'Medium';
+  syncBlurMenu();
+  updateStyleTrigger();
+  document.querySelectorAll('#fsMenu .ddRow').forEach((x, i) =>
+    x.classList.toggle('sel', FONT_SIZES[i] === fontSizePt));
+  $('fsLabel').textContent = fontSizePt + ' pt';
+}
+function setTool(t) {
+  const prev = tool;
+  tool = t;
+  if (prev !== t) resetToolDefaults(t);
+  closeDropdowns();
+  document.querySelectorAll('.tool[data-tool]').forEach(b =>
+    b.classList.toggle('active', b.dataset.tool === t));
+  updateControls();
+  refreshTriggerDisplays();
+  if (!canvas) return;
+  canvas.isDrawingMode = (t === 'draw' || t === 'hl');
+  canvas.selection = (t === 'select');
+  canvas.skipTargetFind = !(t === 'select' || t === 'crop');
+  canvas.defaultCursor = (t === 'pan') ? 'grab' : (t === 'select' ? 'default' : 'crosshair');
+  configureBrush();
+  if (prev === 'crop' && t !== 'crop') {          // leaving the crop mode
+    cropEntry = null;
+    canvas.uniformScaling = false;
+    const a = canvas.getActiveObject();
+    if (a && a.isCropRect) canvas.discardActiveObject();
+    lockCropRects(null);
+    canvas.getObjects().forEach(o => {            // wake the drawings back up
+      if (!o.isCropRect) o.set({selectable: true, evented: true});
+    });
+  }
+  if (t === 'crop') enterCrop();
+}
+
+// Crop is a MODE: entering it dims everything outside the crop area and the
+// bar swaps to aspect presets + Apply / Cancel. Outside the mode the crop
+// rectangle is locked, so it can never be mistaken for a drawn box.
+let cropEntry = null;      // how the rect looked when the mode opened (for Cancel)
+
+function cropRect() { return canvas.getObjects().find(o => o.isCropRect); }
+
+function lockCropRects(except) {
+  canvas.getObjects().filter(o => o.isCropRect).forEach(cr => {
+    const on = cr === except;
+    cr.set({selectable: on, evented: on});
+  });
+}
+
+function setCropAspect(asp, btn) {
+  document.querySelectorAll('#grpAspect .segBtn').forEach(x =>
+    x.classList.toggle('active', x === btn));
+  const cr = cropRect();
+  if (!cr) return;
+  if (asp) {
+    const ratio = asp === 'orig' ? imgW / imgH : parseFloat(asp);
+    const w0 = cr.width * cr.scaleX, h0 = cr.height * cr.scaleY;
+    const c = cr.getCenterPoint();
+    let h1 = Math.sqrt((w0 * h0) / ratio), w1 = h1 * ratio;
+    const fit = Math.min(1, imgW / w1, imgH / h1);
+    w1 *= fit; h1 *= fit;
+    cr.set({width: w1, height: h1, scaleX: 1, scaleY: 1});
+    cr.setPositionByOrigin(c, 'center', 'center');
+    cr.setControlsVisibility({ml: false, mr: false, mt: false, mb: false});
+    canvas.uniformScaling = true;    // corner drags keep the chosen shape
+  } else {
+    cr.setControlsVisibility({ml: true, mr: true, mt: true, mb: true});
+    canvas.uniformScaling = false;
+  }
+  cr.setCoords();
+  canvas.requestRenderAll();
+  pushUndo();
+}
+document.querySelectorAll('#grpAspect .segBtn').forEach(b => {
+  b.onclick = () => setCropAspect(b.dataset.asp, b);
+});
+
+function enterCrop() {
+  canvas.discardActiveObject();
+  // only the crop area is touchable while the mode is open
+  canvas.getObjects().forEach(o => {
+    if (!o.isCropRect) o.set({selectable: false, evented: false});
+  });
+  let cr = cropRect();
+  if (!cr) {
+    cr = new fabric.Rect({
+      isCropRect: true,
+      left: imgW * 0.1, top: imgH * 0.1, width: imgW * 0.8, height: imgH * 0.8,
+      fill: 'rgba(0,0,0,0)', stroke: '#2d7ff9',
+      strokeWidth: Math.max(2, imgW / 500), strokeDashArray: [14, 10],
+      strokeUniform: true, lockRotation: true,
+    });
+    canvas.add(cr);
+    canvas.sendToBack(cr);
+    pushUndo();
+    cropEntry = {fresh: true};
+  } else {
+    cropEntry = {fresh: false, left: cr.left, top: cr.top, width: cr.width,
+                 height: cr.height, scaleX: cr.scaleX, scaleY: cr.scaleY};
+  }
+  styleCropRect();
+  lockCropRects(cr);
+  canvas.setActiveObject(cr);
+  canvas.requestRenderAll();
+  say('Crop: move or resize the bright area, pick a shape, then Apply (Enter). Esc backs out, Delete removes the crop.');
+}
+
+function exitCrop(cancelled) {
+  const cr = cropRect();
+  if (cr && cancelled && cropEntry) {
+    if (cropEntry.fresh) canvas.remove(cr);
+    else {
+      cr.set({left: cropEntry.left, top: cropEntry.top,
+              width: cropEntry.width, height: cropEntry.height,
+              scaleX: cropEntry.scaleX, scaleY: cropEntry.scaleY});
+      cr.setCoords();
+    }
+    pushUndo();
+  }
+  cropEntry = null;
+  setTool('select');
+  canvas.requestRenderAll();
+}
+$('btnCropApply').onclick = () => exitCrop(false);
+$('btnCropCancel').onclick = () => exitCrop(true);
+
+function styleCropRect() {
+  // after loading from JSON, make sure the crop rectangle looks and behaves
+  // right - and stays locked until the Crop tool wakes it up
+  canvas.getObjects().filter(o => o.isCropRect).forEach(cr => {
+    cr.set({fill: 'rgba(0,0,0,0)', stroke: '#2d7ff9',
+            strokeDashArray: [14, 10], strokeUniform: true, lockRotation: true,
+            selectable: false, evented: false});
+    canvas.sendToBack(cr);   // always behind the drawings
+  });
+}
+
+// drawing with the mouse -------------------------------------------------------
+let drawing = null;   // info about the shape being dragged out right now
+let panning = null;
+
+// ---- the arrow: one tool for every straight or curved stroke -------------------
+// An arrow is a Path whose geometry lives in plain numbers on the object
+// (ax1/ay1 = start, ax2/ay2 = end, acx/acy = the bend control), all in image
+// pixels. Three round handles let you move each end and bend the middle;
+// the path is rebuilt from the numbers after every change.
+function arrowD(x1, y1, cx, cy, x2, y2, w, heads) {
+  const head = Math.max(14, w * 3.2);
+  const p = n => Math.round(n * 100) / 100;
+  const headAt = (x, y, a) => {
+    const a1 = a + Math.PI * 0.82, a2 = a - Math.PI * 0.82;
+    return ' M ' + p(x + head * Math.cos(a1)) + ' ' + p(y + head * Math.sin(a1)) +
+           ' L ' + p(x) + ' ' + p(y) +
+           ' L ' + p(x + head * Math.cos(a2)) + ' ' + p(y + head * Math.sin(a2));
+  };
+  let d = 'M ' + p(x1) + ' ' + p(y1) + ' Q ' + p(cx) + ' ' + p(cy) +
+          ' ' + p(x2) + ' ' + p(y2);
+  if (heads >= 1) d += headAt(x2, y2, Math.atan2(y2 - cy, x2 - cx));
+  if (heads === 2) d += headAt(x1, y1, Math.atan2(y1 - cy, x1 - cx));
+  return d;
+}
+
+function rebuildArrow(o) {
+  const tmp = new fabric.Path(
+    arrowD(o.ax1, o.ay1, o.acx, o.acy, o.ax2, o.ay2, o.strokeWidth, o.arrowHeads || 0));
+  o.set({path: tmp.path, width: tmp.width, height: tmp.height,
+         pathOffset: tmp.pathOffset, left: tmp.left, top: tmp.top,
+         angle: 0, scaleX: 1, scaleY: 1});
+  o.setCoords();
+  o.dirty = true;
+  o._abase = {left: o.left, top: o.top};   // remembered so plain drags can be re-absorbed
+  if (o.canvas) o.canvas.requestRenderAll();
+}
+
+// dragging the whole arrow moves left/top - fold that back into the numbers
+function fixArrowPosition(o) {
+  if (!o._abase) { rebuildArrow(o); return; }
+  const dx = o.left - o._abase.left, dy = o.top - o._abase.top;
+  if (!dx && !dy) return;
+  o.ax1 += dx; o.ay1 += dy; o.ax2 += dx; o.ay2 += dy; o.acx += dx; o.acy += dy;
+  rebuildArrow(o);
+}
+
+// the visible middle handle sits ON the curve; the math converts between the
+// handle position and the quadratic's control point
+function arrowMid(o) {
+  return {x: (o.ax1 + 2 * o.acx + o.ax2) / 4, y: (o.ay1 + 2 * o.acy + o.ay2) / 4};
+}
+function arrowControl(getP, apply) {
+  return new fabric.Control({
+    positionHandler: (dim, finalMatrix, o) =>
+      fabric.util.transformPoint(getP(o), o.canvas.viewportTransform),
+    actionHandler: (ev, transform, x, y) => {
+      apply(transform.target, x, y, ev.shiftKey);
+      return true;
+    },
+    actionName: 'arrowPoint',
+    cursorStyle: 'crosshair',
+  });
+}
+function snap45(fx, fy, x, y) {
+  const ang = Math.atan2(y - fy, x - fx);
+  const s = Math.round(ang / (Math.PI / 4)) * (Math.PI / 4);
+  const dist = Math.hypot(x - fx, y - fy);
+  return {x: fx + dist * Math.cos(s), y: fy + dist * Math.sin(s)};
+}
+function attachArrowControls(o) {
+  const endMoved = (obj) => {
+    if (!obj.arrowCurved) {
+      obj.acx = (obj.ax1 + obj.ax2) / 2;
+      obj.acy = (obj.ay1 + obj.ay2) / 2;
+    }
+  };
+  o.controls = {
+    aStart: arrowControl(obj => ({x: obj.ax1, y: obj.ay1}), (obj, x, y, shift) => {
+      if (shift) ({x, y} = snap45(obj.ax2, obj.ay2, x, y));
+      obj.ax1 = x; obj.ay1 = y; endMoved(obj); rebuildArrow(obj);
+    }),
+    aEnd: arrowControl(obj => ({x: obj.ax2, y: obj.ay2}), (obj, x, y, shift) => {
+      if (shift) ({x, y} = snap45(obj.ax1, obj.ay1, x, y));
+      obj.ax2 = x; obj.ay2 = y; endMoved(obj); rebuildArrow(obj);
+    }),
+    aMid: arrowControl(arrowMid, (obj, x, y) => {
+      obj.acx = 2 * x - (obj.ax1 + obj.ax2) / 2;
+      obj.acy = 2 * y - (obj.ay1 + obj.ay2) / 2;
+      obj.arrowCurved = true;
+      rebuildArrow(obj);
+    }),
+  };
+  o.set({hasBorders: false, cornerStyle: 'circle', cornerColor: '#2D7FF9',
+         cornerStrokeColor: '#ffffff', transparentCorners: false,
+         perPixelTargetFind: true, hoverCursor: 'move'});
+}
+
+// after every load from a recipe: arrows get their handles back, pasted
+// pictures get their aspect-keeping corner handles
+function fixupOne(o) {
+  if (o.isArrow) { attachArrowControls(o); rebuildArrow(o); }
+  if (o.isBlurZone) attachBlurRender(o);
+  if (o.isSpotlight) attachSpotRender(o);
+  if (o.isMarker) o.hasControls = false;
+  if (o.type === 'i-text') o.hasControls = false;             // menu sizes only
+  if (o.type === 'path' && !o.isArrow) o.hasControls = false; // pen / highlight
+  if (o.type === 'image' && o.assetAttId)
+    o.setControlsVisibility({ml: false, mr: false, mt: false, mb: false});
+  if (o.type === 'i-text' && o.textStyle)
+    applyStyleToText(o, o.textStyle, texColor(o));   // also migrates old recipes
+}
+function fixupObjects() { canvas.getObjects().forEach(fixupOne); }
+
+function installCanvasBehaviour() {
+  // Like every design app: two-finger scrolling MOVES around the picture,
+  // pinching the trackpad (or holding Cmd/Ctrl while scrolling) ZOOMS.
+  // (A pinch reaches the browser as a scroll event with the Ctrl key set.)
+  canvas.on('mouse:wheel', opt => {
+    const e = opt.e;
+    if (e.ctrlKey || e.metaKey) {
+      const d = Math.max(-50, Math.min(50, e.deltaY));   // tame big mouse-wheel steps
+      let z = canvas.getZoom() * Math.pow(0.995, d);
+      z = Math.min(20, Math.max(0.03, z));
+      canvas.zoomToPoint({x: e.offsetX, y: e.offsetY}, z);
+    } else {
+      const vpt = canvas.viewportTransform;
+      vpt[4] -= e.deltaX;
+      vpt[5] -= e.deltaY;
+      canvas.setViewportTransform(vpt);
+    }
+    e.preventDefault(); e.stopPropagation();
+  });
+
+  canvas.on('mouse:down', opt => {
+    const pt = canvas.getPointer(opt.e);
+    if (tool === 'pan') {
+      panning = {x: opt.e.clientX, y: opt.e.clientY};
+      canvas.defaultCursor = 'grabbing';
+      return;
+    }
+    if (tool === 'select' || tool === 'draw' || tool === 'hl' || tool === 'crop') return;
+    if (tool === 'text') {
+      const t = new fabric.IText('Text', {left: pt.x, top: pt.y,
+        fontSize: Math.round(fontSizePt * sizeScale()), opacity: textOpacity / 100,
+        hasControls: false});   // size comes from the text-size menu, not handles
+      applyStyleToText(t, textStyle, color);
+      canvas.add(t);
+      setTool('select');
+      canvas.setActiveObject(t);
+      t.enterEditing(); t.selectAll();
+      pushUndo();
+      return;
+    }
+    if (tool === 'marker') { addMarker(pt.x, pt.y); return; }
+    // box / circle / arrow / line / blur all start with a drag
+    drawing = {x: pt.x, y: pt.y, obj: null, kind: tool};
+  });
+
+  canvas.on('mouse:move', opt => {
+    if (panning) {
+      const vpt = canvas.viewportTransform;
+      vpt[4] += opt.e.clientX - panning.x;
+      vpt[5] += opt.e.clientY - panning.y;
+      panning = {x: opt.e.clientX, y: opt.e.clientY};
+      canvas.setViewportTransform(vpt);
+      return;
+    }
+    if (!drawing) return;
+    const pt = canvas.getPointer(opt.e);
+    const x1 = drawing.x, y1 = drawing.y;
+    let left = Math.min(x1, pt.x), top = Math.min(y1, pt.y);
+    let w = Math.abs(pt.x - x1), h = Math.abs(pt.y - y1);
+    // Shift = a perfect square / circle, drawn towards the drag direction
+    if (opt.e.shiftKey && (drawing.kind === 'rect' || drawing.kind === 'ellipse')) {
+      const s = Math.max(w, h);
+      left = pt.x < x1 ? x1 - s : x1;
+      top = pt.y < y1 ? y1 - s : y1;
+      w = h = s;
+    }
+    if (drawing.obj) canvas.remove(drawing.obj);
+    const common = {stroke: color, strokeWidth: strokeW(),
+                    fill: fillOn ? color : NO_FILL, opacity: opac(),
+                    strokeDashArray: dashOn ? dashFor(strokeW()) : null,
+                    strokeUniform: true};
+    let o = null;
+    if (drawing.kind === 'blur' || drawing.kind === 'spot')
+      o = new fabric.Rect({left, top, width: w, height: h,
+            fill: drawing.kind === 'spot' ? 'rgba(255,255,255,0.10)' : 'rgba(120,120,120,0.3)',
+            stroke: drawing.kind === 'spot' ? '#ffffff' : '#555', strokeDashArray: [10, 7],
+            strokeWidth: Math.max(2, imgW / 600), strokeUniform: true});
+    else if (drawing.kind === 'rect')
+      o = new fabric.Rect({...common, left, top, width: w, height: h, rx: 2, ry: 2});
+    else if (drawing.kind === 'ellipse')
+      o = new fabric.Ellipse({...common, left, top, rx: w / 2, ry: h / 2});
+    else if (drawing.kind === 'arrow') {
+      let ex = pt.x, ey = pt.y;
+      if (opt.e.shiftKey) ({x: ex, y: ey} = snap45(x1, y1, ex, ey));   // 0/45/90°
+      const cx = (x1 + ex) / 2, cy = (y1 + ey) / 2;   // arrows draw straight;
+                                                       // the mid handle bends them
+      o = new fabric.Path(arrowD(x1, y1, cx, cy, ex, ey, strokeW(), headsChoice),
+            {...common, fill: '', strokeLineCap: 'round', strokeLineJoin: 'round'});
+      o._drawMeta = {x1, y1, cx, cy, ex, ey};
+    }
+    if (o) { o.set({selectable: false, evented: false}); drawing.obj = o; canvas.add(o); }
+    canvas.requestRenderAll();
+  });
+
+  canvas.on('mouse:up', () => {
+    if (panning) { panning = null; canvas.defaultCursor = 'grab'; return; }
+    if (drawing) {
+      const o = drawing.obj;
+      const kind = drawing.kind;
+      drawing = null;
+      if (o && (kind === 'blur' || kind === 'spot')) {
+        canvas.remove(o);                  // the dashed frame was just a preview
+        const zx = Math.max(0, o.left), zy = Math.max(0, o.top);
+        const zw = Math.min(imgW, o.left + o.width) - zx;
+        const zh = Math.min(imgH, o.top + o.height) - zy;
+        if (zw < 8 || zh < 8) { setTool('select'); return; }
+        let z;
+        if (kind === 'blur') {
+          z = new fabric.Rect({left: zx, top: zy, width: zw, height: zh,
+            fill: 'rgba(0,0,0,0)', strokeWidth: 0,
+            isBlurZone: true, blurPx: Math.round(blurBlockPx * sizeScale()),
+            blurSmooth: blurSmoothOn, lockRotation: true});
+          attachBlurRender(z);
+          canvas.add(z);
+        } else {
+          // the spotlight: everything OUTSIDE its bright window dims
+          z = new fabric.Rect({left: zx, top: zy, width: zw, height: zh,
+            fill: 'rgba(0,0,0,0)', strokeWidth: 0,
+            isSpotlight: true, opacity: opac(), lockRotation: true});
+          attachSpotRender(z);
+          canvas.add(z);
+          canvas.sendToBack(z);            // drawings stay bright above the dim
+          styleCropRect();                 // ...and the crop area stays bottom-most
+        }
+        setTool('select');
+        canvas.setActiveObject(z);
+        canvas.requestRenderAll();
+        pushUndo();
+        return;
+      }
+      if (o) {
+        if (kind === 'arrow' && o._drawMeta) {
+          const m = o._drawMeta;
+          delete o._drawMeta;
+          o.set({isArrow: true, arrowHeads: headsChoice, arrowCurved: false,
+                 ax1: m.x1, ay1: m.y1, ax2: m.ex, ay2: m.ey, acx: m.cx, acy: m.cy});
+          attachArrowControls(o);
+          rebuildArrow(o);
+        }
+        o.set({selectable: true, evented: true});
+        o.setCoords();
+        setTool('select');
+        canvas.setActiveObject(o);
+        canvas.requestRenderAll();
+        pushUndo();
+      } else setTool('select');
+    }
+  });
+
+  canvas.targetFindTolerance = 8;      // arrows are thin - be generous about clicks
+  // crop mode dims everything outside the crop area
+  canvas.on('after:render', () => {
+    if (tool !== 'crop' || exporting) return;
+    const cr = canvas.getObjects().find(o => o.isCropRect);
+    if (!cr) return;
+    const ctx = canvas.contextContainer;
+    const v = canvas.viewportTransform;
+    const ac = cr.calcACoords();
+    const x = Math.min(ac.tl.x, ac.br.x), y = Math.min(ac.tl.y, ac.br.y);
+    const w = Math.abs(ac.br.x - ac.tl.x), h = Math.abs(ac.br.y - ac.tl.y);
+    ctx.save();
+    ctx.transform(v[0], v[1], v[2], v[3], v[4], v[5]);
+    ctx.beginPath();
+    ctx.rect(-1e6, -1e6, 2e6, 2e6);
+    ctx.rect(x, y, w, h);
+    ctx.fillStyle = 'rgba(18,20,26,0.55)';
+    ctx.fill('evenodd');
+    // live dimensions, like CleanShot: a dark pill above the corner that
+    // follows every drag ("1418 × 890" - real image pixels)
+    const z = Math.hypot(v[0], v[1]) || 1;
+    const dims = Math.round(w) + ' × ' + Math.round(h);
+    const fs = 12 / z, padX = 7 / z, bxH = 21 / z, gap = 7 / z, r2 = 5 / z;
+    ctx.font = '600 ' + fs + 'px -apple-system, "Segoe UI", Helvetica, sans-serif';
+    const bxW = ctx.measureText(dims).width + padX * 2;
+    let lx = x, ly = y - bxH - gap;
+    if (ly * z + v[5] < 2) ly = y + gap;      // no room above? tuck it inside
+    ctx.beginPath();
+    ctx.moveTo(lx + r2, ly);
+    ctx.arcTo(lx + bxW, ly, lx + bxW, ly + bxH, r2);
+    ctx.arcTo(lx + bxW, ly + bxH, lx, ly + bxH, r2);
+    ctx.arcTo(lx, ly + bxH, lx, ly, r2);
+    ctx.arcTo(lx, ly, lx + bxW, ly, r2);
+    ctx.fillStyle = 'rgba(28,30,36,0.92)';
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(dims, lx + padX, ly + bxH / 2 + 0.5 / z);
+    ctx.restore();
+  });
+  // dragging a whole arrow around: fold the move back into its geometry
+  canvas.on('object:modified', opt => {
+    if (opt.target && opt.target.isArrow) fixArrowPosition(opt.target);
+  });
+  canvas.on('selection:cleared', () => {
+    canvas.getObjects().forEach(o => { if (o.isArrow) fixArrowPosition(o); });
+  });
+  // double-click: straighten an arrow / give a marker a specific number
+  canvas.on('mouse:dblclick', opt => {
+    const t = opt.target;
+    if (!t) return;
+    if (t.isArrow) {
+      t.arrowCurved = false;
+      t.acx = (t.ax1 + t.ax2) / 2;
+      t.acy = (t.ay1 + t.ay2) / 2;
+      rebuildArrow(t);
+      pushUndo();
+    } else if (t.isMarker) {
+      const v = parseInt(prompt('Number for this marker:', t.markerNum || 1) || '', 10);
+      if (v > 0) {
+        t.markerNum = v;
+        t.getObjects()[1].set('text', String(v));
+        t.dirty = true;
+        canvas.requestRenderAll();
+        pushUndo();
+      }
+    }
+  });
+  canvas.on('object:modified', pushUndo);
+  // a text box left completely EMPTY cleans itself up (the "Text" placeholder
+  // deliberately stays - it can be typed into later)
+  canvas.on('text:editing:exited', opt => {
+    const t = opt.target;
+    if (!t) return;
+    if (!(t.text || '').trim()) {
+      canvas.remove(t);
+      canvas.discardActiveObject();
+      canvas.requestRenderAll();
+      pushUndo();
+    }
+  });
+  // when the selection changes, show/hide the matching controls
+  canvas.on('selection:created', updateControls);
+  canvas.on('selection:updated', updateControls);
+  canvas.on('selection:cleared', updateControls);
+  canvas.on('path:created', e => {           // freehand pen / highlighter strokes
+    if (e.path) {
+      // a stroke can be moved and deleted, but not stretched - resize
+      // handles on ink are clutter (thickness comes from the weight menu)
+      e.path.set({strokeUniform: true, hasControls: false});
+      if (tool === 'hl') {
+        // ink that multiplies with the photo, like a real text marker
+        e.path.set({stroke: hlColor, opacity: hlOpacity / 100,
+                    globalCompositeOperation: 'multiply'});
+      } else {
+        e.path.set({opacity: opac()});
+        if (dashOn) e.path.set('strokeDashArray', dashFor(strokeW()));
+      }
+    }
+    pushUndo();
+  });
+}
+
+// ---- numbered markers ---------------------------------------------------------
+function addMarker(x, y) {
+  const n = canvas.getObjects().reduce(
+    (m, o) => Math.max(m, o.isMarker ? (o.markerNum || 0) : 0), 0) + 1;
+  const r = markerSize * sizeScale() / 2;
+  const circle = new fabric.Circle({radius: r, fill: markerColor,
+    originX: 'center', originY: 'center'});
+  const label = new fabric.Text(String(n), {fontSize: Math.round(r * 1.15),
+    fill: '#ffffff', fontWeight: 'bold', originX: 'center', originY: 'center',
+    fontFamily: 'Helvetica, Arial, sans-serif'});
+  const g = new fabric.Group([circle, label], {left: x - r, top: y - r,
+    isMarker: true, markerNum: n, opacity: markerOpacity / 100,
+    hasControls: false});   // size comes from the Badge size menu, not handles
+  canvas.add(g);
+  setTool('select');
+  canvas.setActiveObject(g);
+  canvas.requestRenderAll();
+  pushUndo();
+  say('Marker ' + n + ' placed - click Marker again for number ' + (n + 1) + '.');
+}
+
+// ---- blur zones: a live filter that pixelates whatever sits underneath ---------
+// The zone is a rectangle whose paint step samples what has already been
+// rendered below it (photo AND any drawings), shrinks it to blocks and
+// stretches it back. Move it anywhere - it always blurs what is under it now.
+function attachBlurRender(o) {
+  o.objectCaching = false;                 // must re-sample on every render
+  o.setControlsVisibility({mtr: false});   // rotation would defeat the sampling
+  o._render = function(ctx) {
+    const t = ctx.getTransform();          // includes zoom, retina and export scale
+    const w2 = this.width / 2, h2 = this.height / 2;
+    const xs = [], ys = [];
+    for (const q of [[-w2, -h2], [w2, -h2], [-w2, h2], [w2, h2]]) {
+      xs.push(t.a * q[0] + t.c * q[1] + t.e);
+      ys.push(t.b * q[0] + t.d * q[1] + t.f);
+    }
+    const sx = Math.max(0, Math.floor(Math.min.apply(null, xs)));
+    const sy = Math.max(0, Math.floor(Math.min.apply(null, ys)));
+    const sw = Math.min(ctx.canvas.width, Math.ceil(Math.max.apply(null, xs))) - sx;
+    const sh = Math.min(ctx.canvas.height, Math.ceil(Math.max.apply(null, ys))) - sy;
+    if (sw < 2 || sh < 2) return;
+    const scale = Math.hypot(t.a, t.b);                       // device px per image px
+    // one scratch canvas per zone, reused every frame - a fresh one per
+    // render makes panning stutter once a few zones exist
+    const tmp = this._blurTmp || (this._blurTmp = document.createElement('canvas'));
+    const tc = tmp.getContext('2d');
+    if (this.blurSmooth && typeof tc.filter === 'string') {
+      // TRUE soft blur: sample a padded region (so the edges don't fade),
+      // blur it in one pass, paste only the middle back
+      const rad = Math.max(1, (this.blurPx || 14) * scale * 0.6);
+      const pad = Math.ceil(rad * 2);
+      const px = Math.max(0, sx - pad), py = Math.max(0, sy - pad);
+      const pw = Math.min(ctx.canvas.width, sx + sw + pad) - px;
+      const ph = Math.min(ctx.canvas.height, sy + sh + pad) - py;
+      if (tmp.width !== pw || tmp.height !== ph) { tmp.width = pw; tmp.height = ph; }
+      tc.filter = 'none';
+      tc.clearRect(0, 0, pw, ph);
+      tc.filter = 'blur(' + rad + 'px)';
+      tc.drawImage(ctx.canvas, px, py, pw, ph, 0, 0, pw, ph);
+      tc.filter = 'none';
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(tmp, sx - px, sy - py, sw, sh, sx, sy, sw, sh);
+      ctx.restore();
+      return;
+    }
+    // mosaic: shrink to blocks and stretch back (also the fallback for a
+    // soft zone when the browser has no canvas blur - smoothing then makes
+    // it a gentle haze instead of hard blocks)
+    const block = Math.max(2, (this.blurPx || 14) * scale);
+    const bw = Math.max(1, Math.round(sw / block));
+    const bh = Math.max(1, Math.round(sh / block));
+    if (tmp.width !== bw || tmp.height !== bh) { tmp.width = bw; tmp.height = bh; }
+    tc.imageSmoothingEnabled = !!this.blurSmooth;
+    tc.drawImage(ctx.canvas, sx, sy, sw, sh, 0, 0, bw, bh);
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.imageSmoothingEnabled = !!this.blurSmooth;
+    ctx.drawImage(tmp, 0, 0, bw, bh, sx, sy, sw, sh);
+    ctx.restore();
+  };
+}
+
+// ---- spotlight: dims everything outside its window ----------------------------
+// The zone is a rectangle whose paint step floods the whole canvas with dark
+// EXCEPT its own area (an even-odd hole). It sits just above the photo, so
+// arrows and text drawn on top stay bright. The opacity menu sets how dark
+// the dim is, and the window moves/resizes like any drawing.
+function attachSpotRender(o) {
+  o.objectCaching = false;                // the dark flood is far bigger than the object
+  o.setControlsVisibility({mtr: false});
+  o._render = function(ctx) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(-1e6, -1e6, 2e6, 2e6);
+    ctx.rect(-this.width / 2, -this.height / 2, this.width, this.height);
+    ctx.fillStyle = 'rgba(10,12,16,0.6)';
+    ctx.fill('evenodd');
+    ctx.restore();
+  };
+}
+
+// keyboard: delete + undo
+document.addEventListener('keydown', e => {
+  if (!canvas || $('editor').style.display === 'none') return;
+  // typing in the instructions panel (or any input) must not touch the canvas
+  if (e.target && (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT')) {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { saveNow(); e.preventDefault(); }
+    return;
+  }
+  const active = canvas.getActiveObject();
+  if (active && active.isEditing) return;              // typing inside a text box
+  if (tool === 'crop') {
+    if (e.key === 'Enter') { exitCrop(false); e.preventDefault(); return; }
+    if (e.key === 'Escape') { exitCrop(true); e.preventDefault(); return; }
+  }
+  // one-key tool switching, like in CleanShot (the keys are in the tooltips)
+  if (!e.metaKey && !e.ctrlKey && !e.altKey) {
+    const t = {v: 'select', g: 'pan', c: 'crop', r: 'rect', o: 'ellipse',
+               a: 'arrow', p: 'draw', h: 'hl',
+               t: 'text', m: 'marker', b: 'blur', s: 'spot'}[e.key.toLowerCase()];
+    if (t) { setTool(t); e.preventDefault(); return; }
+    if (e.key.toLowerCase() === 'i') { $('btnImage').click(); e.preventDefault(); return; }
+    if (e.key === 'Escape') {
+      closeDropdowns();
+      canvas.discardActiveObject();
+      canvas.requestRenderAll();
+      setTool('select');
+      e.preventDefault(); return;
+    }
+  }
+  if (!e.metaKey && !e.ctrlKey && !e.altKey &&
+      (e.key === 'ArrowLeft' || e.key === 'ArrowRight' ||
+       e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+    const step = e.shiftKey ? 10 : 1;
+    if (nudgeSelection(e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0,
+                       e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0)) {
+      e.preventDefault(); return;
+    }
+  }
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    deleteSelection(); e.preventDefault();
+  } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd') {
+    duplicateSelection(); e.preventDefault();
+  } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+    if (e.shiftKey) redo(); else undo();
+    e.preventDefault();
+  } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'y') {
+    redo(); e.preventDefault();      // the Windows way to redo
+  } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+    saveNow(); e.preventDefault();
+  }
+});
+function renumberMarkers() {
+  canvas.getObjects().filter(o => o.isMarker)
+    .sort((a, b) => (a.markerNum || 0) - (b.markerNum || 0))
+    .forEach((m, i) => {
+      if (m.markerNum !== i + 1) {
+        m.markerNum = i + 1;
+        m.getObjects()[1].set('text', String(i + 1));
+        m.dirty = true;
+      }
+    });
+}
+function deleteSelection() {
+  const objs = canvas.getActiveObjects();
+  if (!objs.length) { say('Click a drawing first, then press Delete.'); return; }
+  const hadMarker = objs.some(o => o.isMarker);
+  const hadCrop = objs.some(o => o.isCropRect);
+  objs.forEach(o => canvas.remove(o));
+  canvas.discardActiveObject();
+  if (hadMarker) renumberMarkers();    // the sequence stays 1, 2, 3…
+  canvas.requestRenderAll();
+  pushUndo();
+  if (hadCrop && tool === 'crop') { cropEntry = null; setTool('select'); }
+}
+$('btnDelete').onclick = deleteSelection;
+
+// ---- nudging: the arrow keys move the selection 1 px, Shift makes it 10 ------
+let nudgeUndoTimer = null;
+function nudgeSelection(dx, dy) {
+  const a = canvas.getActiveObject();
+  if (!a) return false;
+  a.set({left: a.left + dx, top: a.top + dy});
+  a.setCoords();
+  if (a.isArrow) fixArrowPosition(a);   // fold the move back into its geometry
+  canvas.requestRenderAll();
+  clearTimeout(nudgeUndoTimer);         // a burst of taps becomes ONE undo step
+  nudgeUndoTimer = setTimeout(pushUndo, 400);
+  return true;
+}
+
+// ---- duplicate: Cmd/Ctrl+D copies the selection, offset a little --------------
+function duplicateSelection() {
+  const objs = canvas.getActiveObjects().filter(o => !o.isCropRect);
+  if (!objs.length) { say('Select a drawing first, then press Cmd/Ctrl+D to duplicate it.'); return; }
+  canvas.discardActiveObject();         // restores absolute positions before cloning
+  const off = Math.max(12, Math.round(imgW * 0.015));
+  let nextNum = canvas.getObjects().reduce(
+    (m, o) => Math.max(m, o.isMarker ? (o.markerNum || 0) : 0), 0) + 1;
+  Promise.all(objs.map(o => new Promise(res => o.clone(res, KEEP_PROPS)))).then(clones => {
+    for (const cl of clones) {
+      if (cl.isArrow) {                 // an arrow's geometry lives in its numbers
+        cl.ax1 += off; cl.ay1 += off; cl.ax2 += off; cl.ay2 += off;
+        cl.acx += off; cl.acy += off;
+      } else {
+        cl.set({left: cl.left + off, top: cl.top + off});
+      }
+      if (cl.isMarker) {                // a copied marker continues the sequence
+        cl.markerNum = nextNum;
+        cl.getObjects()[1].set('text', String(nextNum));
+        nextNum++;
+      }
+      canvas.add(cl);        // must be on the canvas BEFORE fixupOne -
+      fixupOne(cl);          // arrow handles need canvas.viewportTransform
+      cl.setCoords();
+    }
+    const sel = clones.length === 1 ? clones[0]
+              : new fabric.ActiveSelection(clones, {canvas: canvas});
+    canvas.setActiveObject(sel);
+    canvas.requestRenderAll();
+    pushUndo();
+  });
+}
+
+// ---- saving -------------------------------------------------------------------
+function exportFlattened() {
+  // Work out the area to save: the crop rectangle if there is one, else everything.
+  const cr = canvas.getObjects().find(o => o.isCropRect);
+  let left = 0, top = 0, width = imgW, height = imgH;
+  if (cr) {
+    const r = cr.calcACoords();                          // corners in picture pixels
+    const xs = [r.tl.x, r.tr.x, r.bl.x, r.br.x], ys = [r.tl.y, r.tr.y, r.bl.y, r.br.y];
+    left = Math.max(0, Math.min(...xs)); top = Math.max(0, Math.min(...ys));
+    width = Math.min(imgW, Math.max(...xs)) - left;
+    height = Math.min(imgH, Math.max(...ys)) - top;
+    if (width < 10 || height < 10) { left = 0; top = 0; width = imgW; height = imgH; }
+  }
+  // Hide the crop rectangle and any selection outlines while we take the photo.
+  exporting = true;
+  const vpt = canvas.viewportTransform.slice();
+  canvas.discardActiveObject();
+  if (cr) cr.visible = false;
+  canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+  let quality = 0.92, out = null, scale = 1;
+  // Try smaller and smaller until we are safely under Airtable's 5 MB limit.
+  for (let i = 0; i < 6; i++) {
+    out = canvas.toDataURL({format: 'jpeg', quality, left, top, width, height,
+                            multiplier: scale});
+    if (out.length * 3 / 4 < 4.4 * 1024 * 1024) break;
+    if (quality > 0.62) quality -= 0.15; else scale *= 0.75;
+  }
+  canvas.setViewportTransform(vpt);
+  if (cr) cr.visible = true;
+  exporting = false;
+  canvas.requestRenderAll();
+  return out;
+}
+
+// Saving happens automatically when you leave (and with Cmd/Ctrl+S).
+let saving = false;
+async function saveNow() {
+  if (!editing || saving) return !dirty;
+  if (!imgW) {   // the picture never loaded (e.g. HEIC in Chrome) - nothing to save
+    say('This picture never loaded, so there is nothing to save.', true);
+    return true;
+  }
+  saving = true;
+  say('Saving to Airtable…', true);
+  try {
+    const recipe = JSON.parse(snapshot());
+    // Pasted pictures are identified by their permanent Airtable id; the
+    // download address is rebuilt fresh on every load, so don't store it.
+    (recipe.objects || []).forEach(function walk(o) {
+      if (o.assetAttId) o.src = '';
+      (o.objects || []).forEach(walk);
+    });
+    const image = exportFlattened();
+    const payload = {
+      baseId: CURRENT.baseId, tableId: CURRENT.tableId,
+      recordId: editing.record.id, attId: editing.img.id,
+      imageField: CURRENT.imageField,
+      filename: editing.img.filename, fabric: recipe, imageDataUrl: image,
+    };
+    if (CURRENT.instructionsField) {
+      payload.instructionsField = CURRENT.instructionsField;
+      payload.instructionsText = $('notesText').value;
+    }
+    const saved = await api('/api/save', payload);
+    removeDraft(editing.record.id, editing.img.id);   // saved for real - the draft has done its job
+    editing.img.annotated = true;
+    if (editing.img.print !== !!saved.print) {
+      editing.img.print = !!saved.print;   // annotating puts it into the printout
+      buildFilmstrip(editing.record, editing.img);
+    }
+    dirty = false;
+    say('Saved ✓');
+    saving = false;
+    return true;
+  } catch (e) {
+    say('Could not save: ' + e.message + '  —  your work is still here, nothing is lost. ' +
+        'Fix the problem (or check the internet) and press "Save & back" again.', true);
+    saving = false;
+    return false;
+  }
+}
+
+// Download the finished picture to this computer - Airtable is not touched.
+$('btnDownload').onclick = () => {
+  if (!editing || !imgW) { say('Open an image first.'); return; }
+  const a = document.createElement('a');
+  a.href = exportFlattened();
+  a.download = splitFilename(editing.img.filename)[0] + ' ANNOTATED.jpg';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  say('Downloaded ✓ - the copy in Airtable is unchanged until you save.');
+};
+
+// the instructions text counts as work too
+$('notesText').addEventListener('input', () => { dirty = true; });
+
+$('btnBack').onclick = async () => {
+  if (dirty) {
+    const ok = await saveNow();
+    if (!ok) return;               // stay here rather than lose the work
+  }
+  if (DEEP) {
+    // this tab was opened by an Airtable button - hand control straight back
+    // to Airtable by closing it. If the browser refuses (some do), fall back
+    // to a friendly note with a link to the record.
+    window.close();
+    setTimeout(() => {
+      $('editor').style.display = 'none';
+      $('home').style.display = 'flex';
+      editing = null;
+      const url = 'https://airtable.com/' + CURRENT.baseId + '/' + CURRENT.tableId +
+                  '/' + DEEP.recordId;
+      $('banner').style.display = 'block';
+      $('banner').innerHTML = 'Saved ✓ — you can close this tab, or go ' +
+        '<a href="' + url + '" target="_blank">back to the record in Airtable</a>.';
+      loadGrid();
+    }, 350);
+    return;
+  }
+  $('editor').style.display = 'none';
+  $('home').style.display = 'flex';
+  editing = null;
+  loadGrid();          // refresh the dots
+};
+
+// closing the tab with unsaved work? the browser asks "are you sure" first
+window.addEventListener('beforeunload', e => {
+  if (editing && dirty) { e.preventDefault(); e.returnValue = ''; }
+});
+
+start();
+</script>
+</body>
+</html>
