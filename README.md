@@ -47,6 +47,7 @@ Every table you annotate in needs these three fields. The easy way is to let the
 | 1   | **ANNOTATIONS DATA**  | Long text  | A small text index that controls which images have annotations, and where their bits and pieces live. Don't edit by hand.                    |
 | 2   | **ANNOTATION ASSETS** | Attachment | The hidden storage where the editable "drawing recipes" (small JSON files) and any pictures you use in your annotations. Don't edit by hand. |
 | 3   | **ANNOTATED IMAGES**  | Attachment | The finished, flattened annotatated pictures.                                                                                                |
+
 ![img2](screenshots/IMG5_GenFields.png)
 
 # Setup Standalone app
