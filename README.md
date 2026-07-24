@@ -1,3 +1,24 @@
+![img1](screenshots/frontpage.png)
+
+I’m working with various fashion companies to spec out and develop PLM systems. People in Fashion loves Excel, so one of the great things about Airtable is for onboarding you can make it feel a bit like Excel. 
+
+Another thing people in fashion love is printing. Lots of printing. Especially product images with annotations that explain exactly how a garment should be made or changed and is a core part of the production process. Those printouts often end up on a sewing machine somewhere on the other side of the world, where the person making the garment doesn't have access to Airtable.
+
+And this is where things become difficult. Airtable can feel like Excel, but it's not Excel. One area where it still falls short is image annotation. You can add simple annotations, but producing flattened, print-ready images isn't really possible. This however Excel is surprisingly good at. 
+
+You can annotate an image, save it, and come back six months later to update it. It gets a bit clunky with larger files, but it get the job done none the less. And despite there is lots of things Excel is pretty shit at compared to Airtable, this image annotation capability has come back to bite us again and again.
+  
+So I thought I’d give it a stab at making something that can annotate images in Airtable, keep the annotations non-destructive, but also print the images as a flattened images. I've come up with this small app that runs locally. You only need Python, an internet connection and an Airtable token.
+
+I've uploaded it to GitHub here - if it'll benefit others. You just download it and follow the readme. 
+
+If you like it (or don't) I'm curious to hear what others think a
+- what could make it better?
+- if it's useful? 
+- or not?
+
+---
+
 # Two ways to work
 We tried to anticipate different ways of working. So there are two ways to use this app. You can work the way that best suits you and one way does not exclude the other.
 
